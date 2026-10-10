@@ -1,6 +1,14 @@
 # Milestone 0: what this project is testing and how
 
-Written before any code. Facts about the files on disk are in `DATA_NOTES.md`. Decisions made while building are in `DECISIONS.md`.
+Drafted before any code. It was later updated in four places where inspecting the data or VGGT's code
+settled an open choice; each is marked *(updated)*:
+
+- the frame order;
+- the foreground mask;
+- the radius normalisation;
+- the data facts.
+
+Facts about the files on disk are in `DATA_NOTES.md`. Decisions made while building are in `DECISIONS.md`.
 
 ## 1. Task, hypothesis, and why `global_nn` vs `anchored_nn` is the test
 
@@ -36,7 +44,7 @@ The experiment measures the net effect. A null or negative result is a finding, 
 Notation:
 
 - `S = N + 1` is the number of images in one VGGT forward pass.
-- `H0 × W0` is the original image size (MAD-Sim: see `DATA_NOTES.md`).
+- `H0 × W0` is the original image size (MAD-Sim: 800 × 800 RGB on pure white; see `DATA_NOTES.md`).
 - `H = W = 518` is the model input size; for square images, VGGT's preprocessing resizes to exactly 518 × 518.
 - `h = w = 37` is the patch grid (518 / 14).
 - `D` is the DINOv2 width (384 for ViT-S/14, 1024 for ViT-L/14).
@@ -47,18 +55,18 @@ Notation:
 | 0 | Image files: query from `test/*`, references from `train/good` | PNG, `H0 × W0` | Pixel grid of the original image. Ground truth is *not* loaded. |
 | 1 | Reference set chosen by the seeded sampler from (seed, class, query identity) | N image refs | Order is canonicalised by a stable key before use, so the sampler's order cannot matter. |
 | 1b | Model input: VGGT's own `load_and_preprocess_images` (alpha composited onto white, bicubic resize to width 518, height rounded to a multiple of 14, centre-crop only if taller than 518) | `[3, 518, 518]` float32 in [0, 1] | One tensor per image, fed to *both* models, so the two grids are aligned by construction. |
-| 2 | VGGT input, references first in canonical order, query last | `[1, S, 3, 518, 518]` | Frame 0 (the first reference) defines VGGT's world frame. |
+| 2 | VGGT input, query first, then the references in canonical (content-hash) order *(updated)* | `[1, S, 3, 518, 518]` | Frame 0 (the query) defines VGGT's world frame. Frame 0 gets its own tokens, VGGT's training sampled the other views around it, and its predictions are slightly better, so the image we score goes first. |
 | 2a | Camera encoding → extrinsics, intrinsics | `[S, 3, 4]`, `[S, 3, 3]` | Extrinsic = **camera-from-world** `[R \| t]`. OpenCV axes: +x right, +y down, +z forward. Principal point `(W/2, H/2)`. |
 | 2b | Depth and depth confidence | `[S, 518, 518]`, `[S, 518, 518]` | Depth along camera +z. Confidence ≥ 1 (VGGT's `1 + exp` activation); higher is more reliable. |
 | 2c | Per-pixel 3D points: depth unprojected with VGGT's own utility (default), or the point-map head | `[S, 518, 518, 3]` float32 | Unprojection: `X_cam = d · K⁻¹ [u, v, 1]ᵀ` with integer pixel indices `u` (column) and `v` (row), as in VGGT's code. Then `X_world = Rᵀ (X_cam − t)`. World = camera frame of frame 0, arbitrary scale. |
 | 3 | DINOv2 last-layer normalised patch tokens, reshaped row-major (token `k = i · 37 + j`), L2-normalised | `[37, 37, D]` per image | Patch `(i, j)` covers input pixels rows `14i … 14i+13`, cols `14j … 14j+13`. Cached per image. |
 | 4 | Join: 3D points and confidence pooled to the patch grid (mean over the patch's foreground pixels) | xyz `[S, 37, 37, 3]`, conf `[S, 37, 37]` | Same world frame as 2c. Same patch ↔ pixel mapping as 3. Cached per image set. |
-| 5 | Foreground mask from image content only (method chosen after inspecting the data; see `DECISIONS.md`) | pixel `[518, 518]` bool → patch `[37, 37]` bool | Same mask for both methods. |
+| 5 | Foreground mask from image content only *(updated)*: a pixel is foreground if its darkest channel is below 0.98, a patch if at least 10% of its pixels are | pixel `[518, 518]` bool → patch `[37, 37]` bool | Same mask for both methods. The background is exactly white in every MAD-Sim image. |
 | 6 | Memory: foreground patches of the N references | features `[M, D]`, xyz `[M, 3]`, conf `[M]` | `M ≈ N × (foreground patches per image)`. |
 | 7 | Query foreground patches | features `[Q, D]`, xyz `[Q, 3]`, conf `[Q]` | |
 | 7a | Cosine distance matrix, shared by both methods | `[Q, M]` float32 | `1 − ⟨f_q, f_m⟩`, in [0, 2]. |
 | 7b | `global_nn` | `[Q]` | Row-wise minimum over all of `M`. |
-| 7c | `anchored_nn` | `[Q]` scores + `[Q]` unseen flags | Row-wise minimum over the neighbour mask `[Q, M]`. The mask is `‖x_q − x_m‖ ≤ r · diag(bbox of reference cloud)` (or the k nearest in 3D) and `conf_m ≥ τ`. A query patch is *unseen* if it has no neighbour or `conf_q < τ`. Unseen patches get the global score, 0, or the maximum score, depending on the unseen mode. |
+| 7c | `anchored_nn` | `[Q]` scores + `[Q]` unseen flags | Row-wise minimum over the neighbour mask `[Q, M]`. The mask is `‖x_q − x_m‖ ≤ r · diag` (or the k nearest in 3D) and `conf_m ≥ τ`, where diag is the diagonal of the reference cloud's bounding box in its principal axes *(updated)*. A query patch is *unseen* if it has no neighbour or `conf_q < τ`. Unseen patches get the global score, 0, or the maximum score, depending on the unseen mode. |
 | 7d | Scatter back to the grid; background patches get 0 | scores `[37, 37]`, unseen `[37, 37]` | |
 | 8 | Image score (mean of top 1 % of foreground patch scores, or max) | scalar | Identical code for both methods. |
 | 8b | Pixel map: bilinear upsample `[37, 37] → [H0, W0]` (`align_corners=False`), then Gaussian smoothing with σ in original pixels | `[H0, W0]` float32 | The 37 × 37 grid tiles the whole 518 × 518 input. For square images that input is the whole original image, so patch `(i, j)` lands on original rows `[i · H0/37, (i+1) · H0/37)`. |
@@ -79,10 +87,10 @@ Notation:
    - A patch spans roughly 1/20–1/30 of the object, so r of a few percent of the bounding-box diagonal is the interesting range.
    - *Failure:* thin or textureless parts, white backgrounds, and very few views inflate the error, which forces r up towards `global_nn`.
 4. **Frame and scale.** VGGT's world frame is frame 0's camera and its scale is arbitrary per run.
-   - r is therefore relative to the reference cloud's bounding-box diagonal, and the whole method is invariant to similarity transforms of the points. A test checks this.
+   - r is therefore relative to the reference cloud's bounding-box diagonal, taken in the cloud's principal axes *(updated)*. An axis-aligned box would change with the arbitrary orientation of the query camera's frame, by up to √3. The method is then invariant to similarity transforms of the points, and a test checks this.
    - *Failure:* outlier points inflate the bounding box and silently enlarge r. Confidence filtering and foreground pooling reduce this. We log the diagonal.
 5. **VGGT is not permutation-invariant.** Frame 0 gets different camera/register tokens and defines the world frame, so the input order changes the output.
-   - We fix the order: references sorted by a stable key, query last. The pipeline is then invariant to the sampler's order by construction. VGGT itself is not.
+   - We fix the order: query first, then references sorted by content hash *(updated)*. The pipeline is then invariant to the sampler's order by construction. VGGT itself is not.
 6. **DINOv2 features are roughly viewpoint-stable.** The same surface location must look more similar across viewpoints than other locations do.
    - *Failure:* foreshortening near silhouettes, view-dependent shading, and specular highlights on rendered plastic make normal patches look anomalous under `anchored_nn`, which has fewer candidates to "hide" in.
 7. **The confidence scale means something on synthetic renders.** VGGT's confidence comes from an aleatoric-uncertainty loss and is unbounded above 1.
@@ -93,6 +101,7 @@ Notation:
    - *Failure:* patches straddling two depth layers of the object, such as a leg in front of the body, still average two surfaces.
 9. **The foreground mask removes only background.**
    - *Failure:* for **Missing** defects, the ground-truth mask can cover pixels that now show background, where the part used to be. Those pixels are excluded from scoring by *both* methods, which caps pixel AUROC and AUPRO for that defect type. This is the same for both methods but matters when comparing with published numbers. It is what the "geometric residual" extension (section 7 of the brief) would address.
+   - *(updated)* Measured: 14–72% of a Missing mask lies on background (mean per class), and Missing is 55% of all defective queries. A development run gave image AUROC 0.445 for good vs Missing, against 0.650 for Burrs and 0.742 for Stains. See `DATA_NOTES.md`.
 10. **Patch-grid alignment.**
     - VGGT and DINOv2 see the identical 518 × 518 tensor.
     - VGGT's dense heads output one value per input pixel.
@@ -131,3 +140,4 @@ None of these block work. Each is resolved provisionally in `DECISIONS.md`.
 10. **DINOv2 ViT-L without registers has high-norm artefact tokens**, mostly in low-information background regions. Background patches are masked out, which limits the effect. The `_reg` backbones can be selected via the existing backbone config key, so no extra code is needed.
 11. **"Steps 2 and 3 are the only ones that need the GPU models."** Correct. Scoring runs from cache without loading either model, and a test checks this.
 12. **A cheaper first test of the mechanism.** For each query patch, measure the 3D distance between it and its `global_nn` match, using the cached geometry and no extra model calls. If anomalous patches' global matches are not disproportionately far away in 3D compared with normal patches' matches, the constraint cannot help, whatever r is. A radius sweep from cache (r ∈ {…, ∞}) is similarly cheap, and r = ∞ is a built-in sanity check. Both are proposed in `DECISIONS.md`.
+13. **The brief's "bounding-box diagonal" is frame-dependent** *(updated)*. An axis-aligned box changes with the orientation of VGGT's world frame, so the box is taken in the cloud's principal axes; see `DECISIONS.md`.

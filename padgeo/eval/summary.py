@@ -150,6 +150,27 @@ def _metrics_table(run_sets: Sequence[RunSet]) -> list[str]:
     return lines
 
 
+def _by_type_table(run_sets: Sequence[RunSet]) -> list[str]:
+    header = ["Class", "Defect type"] + [f"Image AUROC · {rs.method}" for rs in run_sets]
+    lines = [
+        "",
+        "Supplementary: image AUROC of the defect-free queries against each defect type alone (mean ± std"
+        " over seeds, percent).",
+        "",
+        "| " + " | ".join(header) + " |",
+        "|" + "---|" * len(header),
+    ]
+    for class_name in run_sets[0].classes:
+        for defect_type in run_sets[0].results[0]["image_auroc_by_type"][class_name]:
+            cells = [class_name, defect_type]
+            cells += [
+                _format([r["image_auroc_by_type"][class_name][defect_type] for r in rs.results])
+                for rs in run_sets
+            ]
+            lines.append("| " + " | ".join(cells) + " |")
+    return lines
+
+
 def _coverage_table(run_sets: Sequence[RunSet]) -> list[str]:
     anchored = [rs for rs in run_sets if rs.method == "anchored_nn"]
     if not anchored:
@@ -229,6 +250,7 @@ def render_markdown(run_sets: Sequence[RunSet], reference: ReferenceNumbers, tit
         " first.",
         "",
         *_metrics_table(run_sets),
+        *_by_type_table(run_sets),
         *_coverage_table(run_sets),
         *_reference_table(reference, num_references, len(run_sets[0].classes)),
         *_provenance_lines(run_sets),

@@ -247,7 +247,7 @@ class _Heads(torch.nn.Module):
     [("depth", {"camera_head", "depth_head"}), ("pointmap", {"point_head"})],
 )
 def test_keep_needed_heads(point_source, kept):
-    model = keep_needed_heads(_Heads(), point_source)  # type: ignore[arg-type]
+    model = keep_needed_heads(_Heads(), point_source)
     present = {
         name
         for name in ("camera_head", "depth_head", "point_head", "track_head")

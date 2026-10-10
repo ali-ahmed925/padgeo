@@ -112,7 +112,7 @@ def render_query_figure(
     for axis in axes:
         axis.axis("off")
     figure.suptitle(title)
-    figure.tight_layout()
+    figure.tight_layout(rect=(0, 0, 1, 0.9))  # leave room for the suptitle
     out_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(out_path, dpi=120)
     plt.close(figure)

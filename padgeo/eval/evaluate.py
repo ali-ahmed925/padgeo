@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 
-from padgeo.data.base import GroundTruth
+from padgeo.data.base import GOOD, GroundTruth
 from padgeo.eval.metrics import aupro, image_auroc, pixel_auroc
 
 
@@ -28,6 +28,8 @@ class ClassMetrics:
         labels: Per-query label (0 good, 1 defective; from the folder), in query order.
         defect_types: Per-query defect type ("good" for defect-free), in query order.
         empty_defect_masks: Defective queries whose ground-truth mask is empty (kept, counted).
+        image_auroc_by_type: Supplementary diagnostic: image AUROC of the defect-free queries against the
+            queries of each defect type alone.
     """
 
     image_auroc: float
@@ -36,6 +38,7 @@ class ClassMetrics:
     labels: tuple[int, ...]
     defect_types: tuple[str, ...]
     empty_defect_masks: int
+    image_auroc_by_type: dict[str, float]
 
     @property
     def queries_per_type(self) -> dict[str, int]:
@@ -91,12 +94,20 @@ def evaluate_class(
         ]
     )
     maps = np.stack(pixel_maps).astype(np.float32, copy=False)
+    scores = np.asarray(image_scores, dtype=np.float64)
     empty = int(sum(1 for label, mask in zip(labels, masks, strict=True) if label == 1 and not mask.any()))
+    types = np.array([target.defect_type for target in targets])
+    by_type = {
+        defect_type: image_auroc(labels[keep], scores[keep])
+        for defect_type in sorted(set(types.tolist()) - {GOOD})
+        for keep in [(types == GOOD) | (types == defect_type)]
+    }
     return ClassMetrics(
-        image_auroc=image_auroc(labels, np.asarray(image_scores, dtype=np.float64)),
+        image_auroc=image_auroc(labels, scores),
         pixel_auroc=pixel_auroc(masks, maps),
         aupro=aupro(masks, maps),
         labels=tuple(int(label) for label in labels),
         defect_types=tuple(target.defect_type for target in targets),
         empty_defect_masks=empty,
+        image_auroc_by_type=by_type,
     )

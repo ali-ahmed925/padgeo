@@ -1,7 +1,7 @@
 # Kill test, ours: nearest neighbour among reference patches close to the query patch in 3D (VGGT-1B).
 # Identical to killtest_global.yaml except for the `method` section and the experiment name.
 # Scoring hyperparameters were fixed before any run (rationale in docs/DECISIONS.md):
-#   radius 0.05 of the reference cloud's bounding-box diagonal (about 2-3 patch footprints),
+#   radius 0.1 of the reference cloud's bounding-box diagonal (about 2.5 patch footprints, see DECISIONS.md),
 #   min_confidence 1.5 (lower end of the VGGT maintainers' 1.5-3 guidance for depth confidence).
 experiment:
   name: killtest_anchored
@@ -32,7 +32,7 @@ method:
     point_source: depth
     precision: bf16
     device: cuda
-  neighbourhood: {mode: radius, radius: 0.05}
+  neighbourhood: {mode: radius, radius: 0.1}
   unseen: fallback_global
   min_confidence: 1.5
 aggregation:

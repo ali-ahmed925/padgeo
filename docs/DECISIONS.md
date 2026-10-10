@@ -52,9 +52,17 @@ applies identically to both methods and was fixed before any real experiment ran
 - **No rotation augmentation of references.** AnomalyDINO's default for custom datasets adds 8 rotated copies of each reference. Rotated copies have no consistent 3D points (45° rotations do not map patches to patches), and the brief compares "same features, same scoring" without augmentation. Both methods therefore use none. Rotations by multiples of 90° could carry geometry along exactly; this is a possible later extension for both methods.
 - **One distance matrix.** Both methods reduce the same `[Q, M]` matrix: `global_nn` takes the row minimum, and `anchored_nn` takes the row minimum under a neighbour mask. So r = ∞ with `min_confidence: 0` reproduces `global_nn` bit for bit (tested).
 - **Radius.**
-  - It is relative to the axis-aligned bounding-box diagonal of the *eligible* (foreground, confident) reference points of that geometry pass. VGGT's scale is arbitrary per pass, which makes the test invariant to rotation, translation and scale of the points (tested).
-  - Kill-test value: `radius: 0.05`. On MAD-Sim at 518 px, the object spans about 12–20 patches, so a patch is about 1/20–1/35 of the bounding-box diagonal and 0.05 is about 2–3 patch footprints. This is large enough to absorb a patch-scale registration error, and small enough that look-alikes elsewhere on the object are excluded.
-  - Fixed a priori, with no tuning on test data. A radius sweep runs from cache in seconds; any sweep is reported in full.
+  - It is relative to the diagonal of the bounding box of the *eligible* (foreground, confident) reference points of that geometry pass.
+  - **Deviation from the literal brief:** the box is taken in the point cloud's principal axes, not the world axes.
+    - An axis-aligned box changes with the orientation of the frame: rotating a square by 45° changes its axis-aligned diagonal from √2 to 2, and in 3D the factor can reach √3.
+    - VGGT's world frame is the query camera's frame, whose orientation relative to the object is arbitrary.
+    - The axis-aligned version would therefore make r vary with the viewpoint. The principal-axes box is invariant to rotation, translation and uniform scale of the points, which a test now checks; the axis-aligned version failed that test.
+  - **Kill-test value: `radius: 0.1`, derived before any run with real geometry.**
+    - On MAD-Sim the object spans 11–19 patches across the 37 × 37 grid (`DATA_NOTES.md`). The reference cloud's 3D bounding-box diagonal is therefore about √3 × 15 ≈ 26 patch footprints, and 0.1 of it is about 2.5 footprints.
+    - Even with perfect geometry, the nearest reference patch centre can be up to about 0.7 footprints from a query patch centre (sampling offset). The rest of the radius absorbs about 2 footprints of VGGT error.
+    - Look-alikes further than about 10% of the object away are excluded.
+    - The first draft's 0.05 (about 1.3 footprints) would leave almost no slack and turn many patches into "no neighbour" unseen. That would hide the effect behind the global fallback.
+  - No tuning on test data. A radius sweep runs from cache in minutes; any sweep is reported in full, including r = ∞.
 - **kNN alternative.** The k nearest eligible reference patches in 3D. In kNN mode, unseen patches arise only from low confidence, since there are always k neighbours.
 - **Confidence (`min_confidence`).**
   - A query patch below it is unseen (`unseen_low_confidence`).
@@ -88,7 +96,7 @@ applies identically to both methods and was fixed before any real experiment ran
 
 ## 8. Caching, determinism, invariances
 
-- **Features.** Cached per image content hash and model identity (hub commit, backbone, precision, layer, storage dtype) as L2-normalised **float16**, then re-normalised in float32 when used. The values used for scoring are the cached ones on both the fresh and the cached path, so cache vs fresh is bitwise identical (tested). float16 halves the cache: about 2.8 MB per image for ViT-L, so the full dataset is about 17 GB instead of 34 GB.
+- **Features.** Cached per image content hash and model identity (hub commit, backbone, precision, layer, storage dtype) as L2-normalised **float16**, then re-normalised in float32 when used. The values used for scoring are the cached ones on both the fresh and the cached path, so cache vs fresh is bitwise identical (tested). float16 halves the cache: about 2.8 MB per image for ViT-L. That is about 3.9 GB for the 1,405 images of the kill test and about 27 GB for all 9,789 MAD-Sim images, instead of 55 GB in float32.
 - **Cache format.** Each entry stores its identity and is checked on load; writes are atomic. `CACHE_FORMAT_VERSION` is bumped whenever a cached computation changes.
 - **No model loads on a warm cache.** Models are loaded lazily, so a run served entirely from cache never loads either model (tested by making the loaders raise).
 - **Batch size.** `features.batch_size` is a config key. GPU/CPU kernels may differ in the last bits across batch sizes, so features are compared within one float16 ulp and metrics within 1e-6 (tested). Bitwise equality across batch sizes is not something BLAS guarantees.

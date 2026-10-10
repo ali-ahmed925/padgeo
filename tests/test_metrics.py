@@ -118,5 +118,24 @@ def test_evaluate_class_joins_by_query_name(tmp_path):
     assert metrics.labels == (1, 0)
     assert metrics.queries_per_type == {"Burrs": 1, "good": 1}
     assert metrics.empty_defect_masks == 0
+    assert metrics.image_auroc_by_type == {"Burrs": 1.0}
     with pytest.raises(KeyError):
         evaluate_class(["test/Missing/9.png"], [0.5], [perfect], ground_truth)
+
+
+def test_image_auroc_by_defect_type_hand_computed(tmp_path):
+    mask = np.zeros((4, 4), dtype=bool)
+    mask[1, 1] = True
+    mask_path = write_mask(tmp_path / "m.png", mask)
+    ground_truth = {
+        "g0": GroundTruth(0, "good", None),
+        "g1": GroundTruth(0, "good", None),
+        "b0": GroundTruth(1, "Burrs", mask_path),
+        "m0": GroundTruth(1, "Missing", mask_path),
+    }
+    names = ["g0", "g1", "b0", "m0"]
+    scores = [0.2, 0.6, 0.9, 0.4]  # Burrs above both good queries; Missing above one of two
+    maps = [mask.astype(np.float32) * s for s in scores]
+    metrics = evaluate_class(names, scores, maps, ground_truth)
+    assert metrics.image_auroc_by_type == {"Burrs": 1.0, "Missing": 0.5}
+    assert metrics.image_auroc == pytest.approx(0.75)

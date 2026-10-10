@@ -3,7 +3,8 @@
 Each seed of an experiment writes to `<output_dir>/<name>/seed_<seed>/` (class scores are written as soon as a
 class is evaluated, so its pixel maps can be released; the seed-level files are written at the end):
 
-- `results.json`: per-class and mean metrics, coverage (unseen fractions), degenerate-sample counts,
+- `results.json`: per-class and mean metrics, image AUROC per defect type (supplementary), coverage
+  (unseen fractions), degenerate-sample counts,
   timing, peak VRAM, cache statistics, the fully resolved config and provenance (git commit, library
   versions, hardware).
 - `per_class.csv`: one row per class plus a "mean" row.
@@ -138,6 +139,7 @@ class ClassSummary:
     Attributes:
         class_name: Class folder name.
         metrics: Image AUROC, pixel AUROC and AUPRO.
+        image_auroc_by_type: Image AUROC of good vs each defect type (supplementary diagnostic).
         queries: Query counts (total, defective, empty defect masks, per type).
         coverage: Unseen fractions and degenerate-query counts (`coverage_summary`).
         timing: Seconds and peak VRAM (`timing_summary`).
@@ -146,6 +148,7 @@ class ClassSummary:
 
     class_name: str
     metrics: dict[str, float]
+    image_auroc_by_type: dict[str, float]
     queries: dict[str, Any]
     coverage: dict[str, Any]
     timing: dict[str, Any]
@@ -182,6 +185,7 @@ def summarise_class(result: ClassResult) -> ClassSummary:
     return ClassSummary(
         class_name=result.class_name,
         metrics={name: float(getattr(result.metrics, name)) for name in METRICS},
+        image_auroc_by_type=dict(result.metrics.image_auroc_by_type),
         queries={
             "total": len(result.records),
             "defective": int(sum(result.metrics.labels)),
@@ -239,6 +243,7 @@ def write_seed_results(
         "seed": seed,
         "classes": [summary.class_name for summary in summaries],
         "metrics": {"per_class": per_class, "mean": mean},
+        "image_auroc_by_type": {summary.class_name: summary.image_auroc_by_type for summary in summaries},
         "queries": {summary.class_name: summary.queries for summary in summaries},
         "coverage": {summary.class_name: summary.coverage for summary in summaries},
         "timing": {

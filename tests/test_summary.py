@@ -30,6 +30,7 @@ def fake_result(method: str, seed: int, value: float) -> dict:
         "seed": seed,
         "classes": ["03Mallard"],
         "metrics": {"per_class": {"03Mallard": dict(metrics)}, "mean": dict(metrics)},
+        "image_auroc_by_type": {"03Mallard": {"Burrs": value, "Missing": value / 2}},
         "queries": {
             "03Mallard": {"total": 10, "defective": 8, "defective_with_empty_mask": 0, "per_type": {}}
         },
@@ -104,7 +105,14 @@ def test_render_markdown_contents():
         [run_set("global_nn", [0.5, 0.6]), run_set("anchored_nn", [0.7, 0.8])], reference, "T"
     )
     assert "## T" in markdown
-    for expected in ("55.0 ± 7.1", "75.0 ± 7.1", "PADFormer", "81.3", "UniVAD"):
+    for expected in (
+        "55.0 ± 7.1",
+        "75.0 ± 7.1",
+        "PADFormer",
+        "81.3",
+        "UniVAD",
+        "| 03Mallard | Missing | 27.5 ± 3.5",
+    ):
         assert expected in markdown
     assert "not a like-for-like comparison" in markdown
     assert "Coverage of anchored_nn" in markdown

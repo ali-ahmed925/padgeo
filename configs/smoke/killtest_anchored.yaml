@@ -28,7 +28,7 @@ method:
     point_source: depth
     precision: fp32
     device: cpu
-  neighbourhood: {mode: radius, radius: 0.05}
+  neighbourhood: {mode: radius, radius: 0.1}
   unseen: fallback_global
   min_confidence: 1.5
 aggregation:
