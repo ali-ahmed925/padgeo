@@ -98,11 +98,12 @@ def coverage_summary(records: Sequence[QueryRecord]) -> dict[str, Any]:
     patches are scored 0 everywhere; they are counted, never dropped.
     """
     foreground = sum(record.num_foreground for record in records)
+    unseen = sum(int(record.output.unseen.sum()) for record in records)
     no_neighbour = sum(int(record.output.unseen_no_neighbour.sum()) for record in records)
     low_confidence = sum(int(record.output.unseen_low_confidence.sum()) for record in records)
     return {
         "foreground_patches": foreground,
-        "unseen_fraction": _fraction(no_neighbour + low_confidence, foreground),
+        "unseen_fraction": _fraction(unseen, foreground),
         "unseen_no_neighbour_fraction": _fraction(no_neighbour, foreground),
         "unseen_low_confidence_fraction": _fraction(low_confidence, foreground),
         "empty_foreground_queries": sum(record.num_foreground == 0 for record in records),

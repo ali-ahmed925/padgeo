@@ -72,3 +72,25 @@ def test_identity_names_everything_features_depend_on(extractor):
     assert identity["backbone"] == "dinov2_vits14"
     assert identity["precision"] == "fp32"
     assert "7764ea0f912e53c92e82eb78a2a1631e92725fc8" in identity["hub_repo"]
+
+
+@pytest.mark.parametrize(
+    ("precision", "device"),
+    [
+        ("bf16", "cpu"),
+        pytest.param(
+            "fp16",
+            "cuda",
+            marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="fp16 autocast needs CUDA"),
+        ),
+    ],
+)
+def test_half_precision_features_are_close_to_full_precision(extractor, images, precision, device):
+    half = DINOv2Extractor(
+        FeatureConfig(backbone="dinov2_vits14", precision=precision, device=device, batch_size=2)
+    )
+    full = unpack_features(extractor.extract(images[:1])[0])
+    approx = unpack_features(half.extract(images[:1])[0])
+    cosine = (full * approx).sum(-1)
+    assert float(cosine.min()) > 0.97  # same features up to reduced-precision noise
+    assert half.identity["precision"] == precision  # and cached under a different key

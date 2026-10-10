@@ -276,3 +276,25 @@ def test_scores_are_blind_to_folder_names_and_ground_truth(main_run, dataset_roo
     for key, (image_score, patch_scores) in renamed.items():
         assert image_score == expected[key][0]
         assert np.array_equal(patch_scores, expected[key][1])
+
+
+def test_per_object_sampling_reuses_one_reference_set_per_class(main_run, dataset_root, tmp_path):
+    config = experiment_config("fx_per_object", dataset_root, main_run, GLOBAL_METHOD, seeds=(0,))
+    config["data"]["sampling"] = "per_object"
+    config["experiment"]["output_dir"] = str(tmp_path / "outputs")
+    run_script("run", "--config", str(write_config(tmp_path / "per_object.yaml", config)))
+    rows = per_query(tmp_path, "fx_per_object", 0)
+    for class_name in CLASSES:
+        assert len({r["references"] for r in rows if r["class"] == class_name}) == 1
+
+
+def test_max_queries_per_class_evaluates_an_evenly_spaced_subset(main_run, dataset_root, tmp_path):
+    config = experiment_config("fx_subset", dataset_root, main_run, GLOBAL_METHOD, seeds=(0,))
+    config["data"]["max_queries_per_class"] = 3
+    config["experiment"]["output_dir"] = str(tmp_path / "outputs")
+    run_script("run", "--config", str(write_config(tmp_path / "subset.yaml", config)))
+    rows = per_query(tmp_path, "fx_subset", 0)
+    for class_name in CLASSES:
+        names = [r["query"] for r in rows if r["class"] == class_name]
+        # 8 queries sorted by name (upper case first): indices 0, 4 (3.5 rounded half to even) and 7.
+        assert names == ["test/Missing/0.png", "test/good/0.png", "test/good/3.png"]
