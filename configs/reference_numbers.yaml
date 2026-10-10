@@ -1,0 +1,17 @@
+# Published MAD-Sim numbers shown next to our tables (percent). Checked against the paper's HTML on 2026-10-11.
+source: >-
+  PADFormer: Pose-agnostic Anomaly Detection from Sparse View Images (Wang et al., ECCV 2026),
+  arXiv:2608.04210v1, Table 1, MAD-SIM columns.
+note: >-
+  Single runs; the paper reports no seeds or standard deviations and does not state how many classes its
+  means cover (MAD-Sim has 20) or how AUPRO is computed. PADFormer is trained on the full MAD-Sim training
+  set and draws N random references per test image at inference; UniVAD is training-free.
+by_num_references:
+  2:
+    - {name: PADFormer, training: "trained on MAD-Sim", image_auroc: 78.8, pixel_auroc: 89.2, aupro: 76.5}
+    - {name: UniVAD, training: training-free, image_auroc: 57.9, pixel_auroc: 80.4, aupro: 68.8}
+  4:
+    - {name: PADFormer, training: "trained on MAD-Sim", image_auroc: 81.3, pixel_auroc: 92.9, aupro: 86.7}
+    - {name: UniVAD, training: training-free, image_auroc: 58.4, pixel_auroc: 80.0, aupro: 67.9}
+  10:
+    - {name: PADFormer, training: "trained on MAD-Sim", image_auroc: 85.6, pixel_auroc: 94.4, aupro: 88.1}

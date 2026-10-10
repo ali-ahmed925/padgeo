@@ -1,0 +1,42 @@
+# Kill test, ours: nearest neighbour among reference patches close to the query patch in 3D (VGGT-1B).
+# Identical to killtest_global.yaml except for the `method` section and the experiment name.
+# Scoring hyperparameters were fixed before any run (rationale in docs/DECISIONS.md):
+#   radius 0.05 of the reference cloud's bounding-box diagonal (about 2-3 patch footprints),
+#   min_confidence 1.5 (lower end of the VGGT maintainers' 1.5-3 guidance for depth confidence).
+experiment:
+  name: killtest_anchored
+  output_dir: outputs
+  seeds: [0, 1, 2]
+data:
+  dataset: mad_sim
+  root: data/MAD-Sim
+  classes: [03Mallard, 04Turtle, 18Obesobeso]
+  num_references: 4
+  sampling: per_query
+  max_queries_per_class: null
+features:
+  backbone: dinov2_vitl14
+  precision: fp32
+  device: cuda
+  batch_size: 16
+foreground:
+  pixel_threshold: 0.98
+  min_patch_fraction: 0.1
+method:
+  name: anchored_nn
+  device: cuda
+  geometry:
+    backend: vggt
+    model: facebook/VGGT-1B
+    revision: 860abec7937da0a4c03c41d3c269c366e82abdf9
+    point_source: depth
+    precision: bf16
+    device: cuda
+  neighbourhood: {mode: radius, radius: 0.05}
+  unseen: fallback_global
+  min_confidence: 1.5
+aggregation:
+  image_score: {mode: top_percent, percent: 1.0}
+  pixel_sigma: 4.0
+cache:
+  dir: cache

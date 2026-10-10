@@ -1,0 +1,27 @@
+# Python 3.11. Exact pins; `requirements-lock.txt` records the full resolved environment of the reference
+# machine. torch 2.3.1 is the version VGGT's requirements.txt pins; its PyPI Linux wheels are CUDA 12.1 builds.
+torch==2.3.1
+torchvision==0.18.1
+numpy==1.26.4
+scipy==1.13.1
+scikit-learn==1.5.2
+Pillow==10.4.0
+PyYAML==6.0.2
+pydantic==2.9.2
+matplotlib==3.9.2
+
+# VGGT at a pinned commit (installed as a package, not copied), with its runtime dependencies.
+vggt @ git+https://github.com/facebookresearch/vggt@a288dd0f14786c93483e45524328726ab7b1b4ce
+huggingface_hub==0.25.2
+safetensors==0.4.5
+einops==0.8.0
+opencv-python==4.10.0.84
+
+# Dataset download.
+gdown==5.2.0
+
+# Development: tests, lint, type checks.
+pytest==8.3.3
+ruff==0.6.9
+mypy==1.11.2
+types-PyYAML==6.0.12.20240917

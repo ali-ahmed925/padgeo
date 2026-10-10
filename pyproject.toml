@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "padgeo"
+version = "0.1.0"
+description = "Training-free pose-agnostic anomaly detection with 3D-anchored feature matching"
+requires-python = ">=3.11,<3.12"
+# Runtime dependencies are pinned in requirements.txt (exact versions, including the VGGT commit).
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["padgeo*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["third_party", "data", "cache", "outputs"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",   # pycodestyle, pyflakes (unused imports/variables)
+    "I",             # import order
+    "B",             # bugbear
+    "UP",            # modern syntax
+    "SIM", "C4", "PIE", "RET",
+    "ARG",           # unused arguments
+    "ERA",           # commented-out code
+    "PTH",           # pathlib
+    "NPY",           # numpy
+    "PT",            # pytest style
+    "RUF",
+    "ANN",           # type annotations everywhere
+    "D",             # docstrings
+]
+ignore = [
+    "D105", "D107",  # magic methods / __init__ are documented on the class
+    "D203", "D213",  # conflicting pydocstyle pairs: use D211 + D212
+    "ANN101", "ANN102",  # deprecated: annotations for self / cls
+    "ANN401",        # Any is allowed where a value is genuinely untyped (YAML, JSON)
+    "RET504",        # naming a value before returning it is often clearer
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "ANN"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["padgeo", "scripts", "tests"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+strict_equality = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = ["vggt.*", "sklearn.*", "scipy.*", "skimage.*", "matplotlib.*", "anomalib.*", "torchmetrics.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "vggt_weights: downloads and runs the real VGGT-1B checkpoint (experiment machine; enable with PADGEO_RUN_VGGT=1)",
+]

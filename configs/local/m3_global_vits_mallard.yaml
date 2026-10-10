@@ -1,0 +1,29 @@
+# Milestone 3 check on the 6 GB development machine: the global_nn baseline end to end on one full class
+# with DINOv2 ViT-S (real features, all queries, one seed). Not a paper result: the paper uses ViT-L.
+experiment:
+  name: m3_global_vits_mallard
+  output_dir: outputs
+  seeds: [0]
+data:
+  dataset: mad_sim
+  root: data/MAD-Sim
+  classes: [03Mallard]
+  num_references: 4
+  sampling: per_query
+  max_queries_per_class: null
+features:
+  backbone: dinov2_vits14
+  precision: fp32
+  device: cuda
+  batch_size: 8
+foreground:
+  pixel_threshold: 0.98
+  min_patch_fraction: 0.1
+method:
+  name: global_nn
+  device: cuda
+aggregation:
+  image_score: {mode: top_percent, percent: 1.0}
+  pixel_sigma: 4.0
+cache:
+  dir: cache

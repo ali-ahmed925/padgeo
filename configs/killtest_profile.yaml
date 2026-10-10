@@ -1,0 +1,9 @@
+# First step of the kill test on the 24 GB machine: peak VRAM and seconds per query for N = 2, 4, 10 in full
+# and half precision, and how far the 3D points move between the two precisions.
+# Data, geometry, foreground and neighbourhood settings come from the anchored kill-test config.
+name: killtest_profile
+output_dir: outputs
+experiment_config: configs/killtest_anchored.yaml
+num_references: [2, 4, 10]
+precisions: [fp32, bf16]
+queries_per_setting: 3

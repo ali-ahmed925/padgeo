@@ -1,0 +1,29 @@
+# Local smoke version of configs/killtest_global.yaml (6 GB development machine): same classes, N, sampling,
+# masks and aggregation, but DINOv2 ViT-S and 8 evenly spaced queries per class. Numbers are meaningless.
+experiment:
+  name: smoke_killtest_global
+  output_dir: outputs
+  seeds: [0, 1, 2]
+data:
+  dataset: mad_sim
+  root: data/MAD-Sim
+  classes: [03Mallard, 04Turtle, 18Obesobeso]
+  num_references: 4
+  sampling: per_query
+  max_queries_per_class: 8
+features:
+  backbone: dinov2_vits14
+  precision: fp32
+  device: cuda
+  batch_size: 8
+foreground:
+  pixel_threshold: 0.98
+  min_patch_fraction: 0.1
+method:
+  name: global_nn
+  device: cuda
+aggregation:
+  image_score: {mode: top_percent, percent: 1.0}
+  pixel_sigma: 4.0
+cache:
+  dir: cache

@@ -1,0 +1,7 @@
+# Local smoke version of configs/killtest_profile.yaml (fake backend; timings are not VGGT's).
+name: smoke_killtest_profile
+output_dir: outputs
+experiment_config: configs/smoke/killtest_anchored.yaml
+num_references: [2, 4, 10]
+precisions: [fp32, bf16]
+queries_per_setting: 2
