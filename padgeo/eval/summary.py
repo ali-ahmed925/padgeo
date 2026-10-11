@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from padgeo.config import Config, load_yaml
 from padgeo.eval.results import METRICS
 
 # Config sections that must be identical across compared runs. `method` may differ (it is the treatment);
@@ -48,8 +48,7 @@ class ReferenceNumbers(BaseModel):
 
 def load_reference_numbers(path: Path) -> ReferenceNumbers:
     """Load and validate the reference-numbers YAML file."""
-    with path.open(encoding="utf-8") as handle:
-        return ReferenceNumbers.model_validate(yaml.safe_load(handle))
+    return ReferenceNumbers.model_validate(load_yaml(path))
 
 
 @dataclass(frozen=True)
@@ -77,25 +76,29 @@ class RunSet:
         return list(self.results[0]["classes"])
 
 
-def load_run_set(experiment_dir: Path) -> RunSet:
-    """Read every `seed_*/results.json` below an experiment directory.
+def load_run_set(config: Config) -> RunSet:
+    """Read the results of every seed listed in an experiment config.
+
+    Only `seed_<s>` directories for the config's seeds are read, and each must have been produced by exactly
+    this config (the resolved config stored in its `results.json`). Leftovers of an earlier run with
+    different settings or seeds therefore cannot enter a table.
 
     Raises:
-        FileNotFoundError: If no seed results exist.
-        ValueError: If the seeds disagree on experiment, method or classes.
+        FileNotFoundError: If a configured seed has no results.
+        ValueError: If a seed's results were produced with a different config.
     """
-    paths = sorted(experiment_dir.glob("seed_*/results.json"))
-    if not paths:
-        raise FileNotFoundError(f"no seed_*/results.json under {experiment_dir}")
-    results = sorted(
-        (json.loads(path.read_text(encoding="utf-8")) for path in paths), key=lambda r: r["seed"]
-    )
-    first = results[0]
-    for result in results[1:]:
-        for key in ("experiment", "method", "classes"):
-            if result[key] != first[key]:
-                raise ValueError(f"{experiment_dir}: seeds disagree on {key}")
-    return RunSet(name=first["experiment"], method=first["method"], results=tuple(results))
+    experiment_dir = config.experiment.output_dir / config.experiment.name
+    expected = json.loads(config.model_dump_json())
+    results = []
+    for seed in config.experiment.seeds:
+        path = experiment_dir / f"seed_{seed}" / "results.json"
+        if not path.is_file():
+            raise FileNotFoundError(f"missing results for seed {seed}: {path}")
+        result = json.loads(path.read_text(encoding="utf-8"))
+        if result["config"] != expected:
+            raise ValueError(f"{path} was produced with a different config; rerun the experiment")
+        results.append(result)
+    return RunSet(name=config.experiment.name, method=config.method.name, results=tuple(results))
 
 
 def check_comparable(run_sets: Sequence[RunSet]) -> None:
@@ -128,9 +131,14 @@ def mean_std(values: Sequence[float]) -> tuple[float, float]:
     return float(array.mean()), std
 
 
-def _format(values: Sequence[float]) -> str:
-    mean, std = mean_std([100.0 * value for value in values])
-    return f"{mean:.1f}" if np.isnan(std) else f"{mean:.1f} ± {std:.1f}"
+def _format(values: Sequence[float], *, percent: bool = True, signed: bool = False) -> str:
+    """Mean ± sample std of per-seed values ("n/a" if any value is missing)."""
+    if any(value is None for value in values):
+        return "n/a"
+    scale = 100.0 if percent else 1.0
+    mean, std = mean_std([scale * value for value in values])
+    text = f"{mean:+.1f}" if signed else f"{mean:.1f}"
+    return text if np.isnan(std) else f"{text} ± {std:.1f}"
 
 
 def metric_values(run_set: RunSet, metric: str, class_name: str | None) -> list[float]:
@@ -140,8 +148,16 @@ def metric_values(run_set: RunSet, metric: str, class_name: str | None) -> list[
     return [float(result["metrics"]["per_class"][class_name][metric]) for result in run_set.results]
 
 
+def _runs_legend(run_sets: Sequence[RunSet]) -> list[str]:
+    lines = ["Runs (columns are labelled by run name):", ""]
+    for run_set in run_sets:
+        method = {k: v for k, v in run_set.results[0]["config"]["method"].items() if k != "name"}
+        lines.append(f"- `{run_set.name}`: {run_set.method}, {json.dumps(method, separators=(', ', ': '))}")
+    return [*lines, ""]
+
+
 def _metrics_table(run_sets: Sequence[RunSet]) -> list[str]:
-    header = ["Class"] + [f"{_METRIC_LABELS[m]} · {rs.method}" for m in METRICS for rs in run_sets]
+    header = ["Class"] + [f"{_METRIC_LABELS[m]} · {rs.name}" for m in METRICS for rs in run_sets]
     lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     for class_name in [*run_sets[0].classes, None]:
         cells = [class_name or "**Mean**"]
@@ -150,8 +166,39 @@ def _metrics_table(run_sets: Sequence[RunSet]) -> list[str]:
     return lines
 
 
+def _paired_difference_table(run_sets: Sequence[RunSet]) -> list[str]:
+    """Each run minus the first, seed by seed.
+
+    Both runs used the same references for every query of a seed (checked by `check_comparable`), so the
+    per-seed difference is a paired comparison.
+    """
+    if len(run_sets) < 2:
+        return []
+    base = run_sets[0]
+    header = ["Run", "Class"] + [f"Δ {_METRIC_LABELS[m]}" for m in METRICS]
+    lines = [
+        "",
+        f"Paired difference to `{base.name}` (per seed, same references; mean ± std over seeds,"
+        " percentage points):",
+        "",
+        "| " + " | ".join(header) + " |",
+        "|" + "---|" * len(header),
+    ]
+    for run_set in run_sets[1:]:
+        for class_name in [*base.classes, None]:
+            cells = [run_set.name, class_name or "**Mean**"]
+            for metric in METRICS:
+                ours, theirs = (
+                    metric_values(run_set, metric, class_name),
+                    metric_values(base, metric, class_name),
+                )
+                cells.append(_format([a - b for a, b in zip(ours, theirs, strict=True)], signed=True))
+            lines.append("| " + " | ".join(cells) + " |")
+    return lines
+
+
 def _by_type_table(run_sets: Sequence[RunSet]) -> list[str]:
-    header = ["Class", "Defect type"] + [f"Image AUROC · {rs.method}" for rs in run_sets]
+    header = ["Class", "Defect type"] + [f"Image AUROC · {rs.name}" for rs in run_sets]
     lines = [
         "",
         "Supplementary: image AUROC of the defect-free queries against each defect type alone (mean ± std"
@@ -175,22 +222,25 @@ def _coverage_table(run_sets: Sequence[RunSet]) -> list[str]:
     anchored = [rs for rs in run_sets if rs.method == "anchored_nn"]
     if not anchored:
         return []
-    keys = ("unseen_fraction", "unseen_no_neighbour_fraction", "unseen_low_confidence_fraction")
+    fractions = ("unseen_fraction", "unseen_no_neighbour_fraction", "unseen_low_confidence_fraction")
     lines = [
         "",
-        "Coverage of anchored_nn: fraction of foreground query patches that were unseen (mean ± std over"
-        " seeds, percent). Unseen patches use the configured unseen mode.",
+        "Coverage of anchored_nn (mean ± std over seeds). Unseen: percent of foreground query patches, which"
+        " use the configured unseen mode. Radius: the effective radius in query patches (median over"
+        " queries). Eligible: percent of reference patches passing the confidence filter (median).",
         "",
-        "| Run | Class | Unseen | No neighbour | Low confidence | Empty-foreground queries |",
-        "|---|---|---|---|---|---|",
+        "| Run | Class | Unseen | No neighbour | Low confidence | Radius (patches) | Eligible |"
+        " Empty-foreground queries |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for run_set in anchored:
         for class_name in run_set.classes:
+            coverage = [r["coverage"][class_name] for r in run_set.results]
             cells = [run_set.name, class_name]
-            cells += [_format([r["coverage"][class_name][k] for r in run_set.results]) for k in keys]
-            cells.append(
-                str(max(r["coverage"][class_name]["empty_foreground_queries"] for r in run_set.results))
-            )
+            cells += [_format([c[key] for c in coverage]) for key in fractions]
+            cells.append(_format([c["radius_in_query_patches_median"] for c in coverage], percent=False))
+            cells.append(_format([c["eligible_reference_fraction_median"] for c in coverage]))
+            cells.append(str(max(c["empty_foreground_queries"] for c in coverage)))
             lines.append("| " + " | ".join(cells) + " |")
     return lines
 
@@ -249,7 +299,9 @@ def render_markdown(run_sets: Sequence[RunSet], reference: ReferenceNumbers, tit
         " Values are percent, mean ± sample std over seeds; the mean row averages classes within each seed"
         " first.",
         "",
+        *_runs_legend(run_sets),
         *_metrics_table(run_sets),
+        *_paired_difference_table(run_sets),
         *_by_type_table(run_sets),
         *_coverage_table(run_sets),
         *_reference_table(reference, num_references, len(run_sets[0].classes)),

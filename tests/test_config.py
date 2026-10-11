@@ -144,3 +144,10 @@ def test_killtest_configs_differ_only_in_method():
     assert isinstance(anchored_cfg.method, AnchoredNNConfig)
     assert isinstance(anchored_cfg.method.geometry, VGGTGeometryConfig)
     assert anchored_cfg.method.geometry.model == "facebook/VGGT-1B"
+
+
+def test_duplicate_keys_are_rejected(tmp_path):
+    path = tmp_path / "dup.yaml"
+    path.write_text(yaml.safe_dump(BASE) + "experiment:\n  name: again\n")  # a second top-level key
+    with pytest.raises(yaml.constructor.ConstructorError, match="duplicate keys"):
+        load_config(path)

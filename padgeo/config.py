@@ -14,7 +14,7 @@ Rules enforced here:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -289,12 +289,30 @@ def load_profile_config(path: Path) -> tuple[ProfileConfig, Config]:
     Raises:
         ValueError: If the referenced experiment is not an anchored_nn experiment.
     """
-    with path.open(encoding="utf-8") as handle:
-        profile = ProfileConfig.model_validate(yaml.safe_load(handle))
+    profile = ProfileConfig.model_validate(load_yaml(path))
     experiment = load_config(profile.experiment_config)
     if not isinstance(experiment.method, AnchoredNNConfig):
         raise ValueError(f"{profile.experiment_config} must be an anchored_nn config")
     return profile, experiment
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """YAML loader that rejects duplicate keys (PyYAML otherwise keeps the last value silently)."""
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        keys = [self.construct_object(key_node, deep=deep) for key_node, _ in node.value]
+        duplicates = sorted({str(key) for key in keys if keys.count(key) > 1})
+        if duplicates:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"duplicate keys {duplicates}", node.start_mark
+            )
+        return super().construct_mapping(node, deep=deep)
+
+
+def load_yaml(path: Path) -> Any:
+    """Parse a YAML file with the strict loader (duplicate keys raise)."""
+    with path.open(encoding="utf-8") as handle:
+        return yaml.load(handle, Loader=_UniqueKeyLoader)  # a SafeLoader subclass
 
 
 def load_config(path: Path) -> Config:
@@ -303,9 +321,7 @@ def load_config(path: Path) -> Config:
     Raises:
         pydantic.ValidationError: On unknown keys, missing required keys, or invalid values.
     """
-    with path.open(encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle)
-    return Config.model_validate(raw)
+    return Config.model_validate(load_yaml(path))
 
 
 def config_to_yaml(config: BaseModel) -> str:

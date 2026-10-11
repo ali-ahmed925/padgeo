@@ -68,7 +68,7 @@ Notation:
 | 7b | `global_nn` | `[Q]` | Row-wise minimum over all of `M`. |
 | 7c | `anchored_nn` | `[Q]` scores + `[Q]` unseen flags | Row-wise minimum over the neighbour mask `[Q, M]`. The mask is `‖x_q − x_m‖ ≤ r · diag` (or the k nearest in 3D) and `conf_m ≥ τ`, where diag is the diagonal of the reference cloud's bounding box in its principal axes *(updated)*. A query patch is *unseen* if it has no neighbour or `conf_q < τ`. Unseen patches get the global score, 0, or the maximum score, depending on the unseen mode. |
 | 7d | Scatter back to the grid; background patches get 0 | scores `[37, 37]`, unseen `[37, 37]` | |
-| 8 | Image score (mean of top 1 % of foreground patch scores, or max) | scalar | Identical code for both methods. |
+| 8 | Image score: mean of the top 1 % of the full patch grid, background at 0 (k = 13 for 37 × 37, as AnomalyDINO), or max *(updated)* | scalar | Identical code for both methods. |
 | 8b | Pixel map: bilinear upsample `[37, 37] → [H0, W0]` (`align_corners=False`), then Gaussian smoothing with σ in original pixels | `[H0, W0]` float32 | The 37 × 37 grid tiles the whole 518 × 518 input. For square images that input is the whole original image, so patch `(i, j)` lands on original rows `[i · H0/37, (i+1) · H0/37)`. |
 | 9 | Stored per query: image score, patch scores, unseen mask, timing, peak VRAM | | |
 | 10 | Labels and masks joined only here: image AUROC (scores vs good/defective), pixel AUROC and AUPRO (maps vs ground-truth masks) | per class | |
@@ -88,7 +88,7 @@ Notation:
    - *Failure:* thin or textureless parts, white backgrounds, and very few views inflate the error, which forces r up towards `global_nn`.
 4. **Frame and scale.** VGGT's world frame is frame 0's camera and its scale is arbitrary per run.
    - r is therefore relative to the reference cloud's bounding-box diagonal, taken in the cloud's principal axes *(updated)*. An axis-aligned box would change with the arbitrary orientation of the query camera's frame, by up to √3. The method is then invariant to similarity transforms of the points, and a test checks this.
-   - *Failure:* outlier points inflate the bounding box and silently enlarge r. Confidence filtering and foreground pooling reduce this. We log the diagonal.
+   - *Failure:* outlier points inflate the bounding box and silently enlarge r. Confidence filtering, foreground pooling and a 1%-trimmed extent per principal axis reduce this *(updated)*. The effective radius is logged per query in units of the query's patch spacing (`radius_in_query_patches`), so any inflation is visible.
 5. **VGGT is not permutation-invariant.** Frame 0 gets different camera/register tokens and defines the world frame, so the input order changes the output.
    - We fix the order: query first, then references sorted by content hash *(updated)*. The pipeline is then invariant to the sampler's order by construction. VGGT itself is not.
 6. **DINOv2 features are roughly viewpoint-stable.** The same surface location must look more similar across viewpoints than other locations do.
@@ -122,7 +122,7 @@ Notation:
 | Cherry-picked seeds | Seeds are fixed in config (0, 1, 2). Every seed is reported, as mean ± std. |
 | Stale cache entries mixing configurations | Cache keys hash the model identity, resolution, precision, point source, mask config and the exact ordered image set (content hashes). A test checks that changing any of them changes the key. |
 | A skipped sample silently changes the metric | Nothing is skipped silently. Exceptions propagate. Degenerate cases (for example an empty foreground) are scored by a defined rule, counted, and reported in the results file. |
-| Surprisingly good numbers caused by a bug | Treated as a leak first. The checks are the leak test above, a pose-free sanity check that r = ∞ reproduces `global_nn` exactly, and coverage statistics. |
+| Surprisingly good numbers caused by a bug | Treated as a leak first. The checks are the leak test above, a pose-free sanity check that r = ∞ with `min_confidence: 0` reproduces `global_nn` exactly, and coverage statistics. |
 
 ## 5. Open questions, and places where the brief is ambiguous or (I think) wrong
 

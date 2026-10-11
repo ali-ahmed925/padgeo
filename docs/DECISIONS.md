@@ -35,7 +35,7 @@ applies identically to both methods and was fixed before any real experiment ran
 - **Join.**
   - A patch's point and confidence are the means over its *foreground* pixels. Averaging all pixels would pull boundary patches towards the background depth, and VGGT predicts essentially random depth with low confidence on pure white backgrounds, which were never supervised in training.
   - Patches without foreground pixels get NaN, so accidental use fails a finiteness check.
-- **Cache key: the exact ordered image set.** The brief's "(class, seed, N, query id)" would reuse stale entries after a change of sampling mode. Keying on the ordered content hashes, the backend identity (model, revision, package version, point source, precision) and the foreground settings covers class, seed, N and mode. Only patch-level xyz and confidence are stored.
+- **Cache key: the exact ordered image set.** The brief's "(class, seed, N, query id)" would reuse stale entries after a change of sampling mode. Keying on the ordered content hashes, the backend identity (model, revision, VGGT code commit, point source, precision) and the foreground settings covers class, seed, N and mode. Only patch-level xyz and confidence are stored. The VGGT package reports version 0.0.1 for every commit, so the commit recorded by pip (`direct_url.json`) is used; a VGGT upgrade therefore invalidates cached geometry.
 
 ## 4. Foreground mask (chosen after inspecting the data)
 
@@ -57,6 +57,8 @@ applies identically to both methods and was fixed before any real experiment ran
     - An axis-aligned box changes with the orientation of the frame: rotating a square by 45° changes its axis-aligned diagonal from √2 to 2, and in 3D the factor can reach √3.
     - VGGT's world frame is the query camera's frame, whose orientation relative to the object is arbitrary.
     - The axis-aligned version would therefore make r vary with the viewpoint. The principal-axes box is invariant to rotation, translation and uniform scale of the points, which a test now checks; the axis-aligned version failed that test.
+  - **Robust extent.** Each axis' extent is its 1st-to-99th percentile range (`EXTENT_TRIM = 0.01`), so a few stray points cannot stretch the box. Without trimming, one stray silhouette patch (depth bleeding towards the background) could double or triple r without any visible sign. Fixed before any run with real geometry.
+  - **Logged.** Every query records its effective radius in units of its own patch spacing (`radius_in_query_patches`) and the fraction of reference patches passing the confidence filter (`eligible_reference_fraction`). The coverage table shows the medians, so inflation, or a filter that removes most references, is visible in the results.
   - **Kill-test value: `radius: 0.1`, derived before any run with real geometry.**
     - On MAD-Sim the object spans 11–19 patches across the 37 × 37 grid (`DATA_NOTES.md`). The reference cloud's 3D bounding-box diagonal is therefore about √3 × 15 ≈ 26 patch footprints, and 0.1 of it is about 2.5 footprints.
     - Even with perfect geometry, the nearest reference patch centre can be up to about 0.7 footprints from a query patch centre (sampling offset). The rest of the radius absorbs about 2 footprints of VGGT error.
@@ -91,13 +93,16 @@ applies identically to both methods and was fixed before any real experiment ran
   - The randomness comes from `SeedSequence([seed, hash(class), hash(query content)])`, so a query's references do not depend on file or folder names, on the other queries, or on iteration order.
   - The pool is in content-hash order. A reference byte-identical to its query is an error.
 - **Seeds.** 0, 1, 2. Only reference sampling is random; the models are frozen and deterministic.
-- **Comparability is enforced.** `make_table.py` refuses to tabulate runs whose `data`, `features`, `foreground` or `aggregation` sections, seeds or evaluated queries differ.
+- **Comparability is enforced.** `make_table.py` reads exactly the seeds listed in each config, and refuses any seed whose stored config differs from the current config file. Leftovers of an older run therefore cannot enter a table. It also refuses runs whose `data`, `features`, `foreground` or `aggregation` sections, seeds or evaluated queries differ from each other. Columns are labelled by run name and each run's method settings are listed.
+- **Paired differences.** Both methods use the same references for every query of a seed, so the table reports each run minus the first, seed by seed (mean ± std over seeds). This is a more appropriate uncertainty for the comparison than two unpaired mean ± std columns.
 - **Smoke subsets.** `max_queries_per_class` evaluates an evenly spaced subset in name order. It is used only in smoke configs; every real config has `null` (all queries).
 
 ## 8. Caching, determinism, invariances
 
-- **Features.** Cached per image content hash and model identity (hub commit, backbone, precision, layer, storage dtype) as L2-normalised **float16**, then re-normalised in float32 when used. The values used for scoring are the cached ones on both the fresh and the cached path, so cache vs fresh is bitwise identical (tested). float16 halves the cache: about 2.8 MB per image for ViT-L. That is about 3.9 GB for the 1,405 images of the kill test and about 27 GB for all 9,789 MAD-Sim images, instead of 55 GB in float32.
-- **Cache format.** Each entry stores its identity and is checked on load; writes are atomic. `CACHE_FORMAT_VERSION` is bumped whenever a cached computation changes.
+- **Features.** Cached per image content hash and model identity (hub commit, backbone, precision, layer, storage dtype, and the VGGT commit whose preprocessing produced the input) as L2-normalised **float16**, then re-normalised in float32 when used. The values used for scoring are the cached ones on both the fresh and the cached path, so cache vs fresh is bitwise identical (tested). float16 halves the cache: about 2.8 MB per image for ViT-L. That is about 3.9 GB for the 1,405 images of the kill test and about 27 GB for all 9,789 MAD-Sim images, instead of 55 GB in float32.
+- **Cache format.** Each entry stores its identity and is checked on load; writes are atomic, and each tensor is saved as its own copy. A slice of a batch would otherwise serialise the whole batch, which the review found inflated feature entries 8–16 times. `CACHE_FORMAT_VERSION` (now 2) is bumped whenever a cached computation or key changes.
+- **Strict YAML.** Duplicate keys in a config file are errors; PyYAML would otherwise silently keep the last value.
+- **Fake backend viewpoints.** They are drawn from a cone (azimuth ±45°, elevation ±30°), so images of one set overlap, as references and query do in practice. Tests and smoke runs then exercise 3D matching on most patches, not on the few percent that random viewpoints on the whole sphere would overlap.
 - **No model loads on a warm cache.** Models are loaded lazily, so a run served entirely from cache never loads either model (tested by making the loaders raise).
 - **Batch size.** `features.batch_size` is a config key. GPU/CPU kernels may differ in the last bits across batch sizes, so features are compared within one float16 ulp and metrics within 1e-6 (tested). Bitwise equality across batch sizes is not something BLAS guarantees.
 - **Determinism.** `seed_everything` seeds the Python, NumPy and torch RNGs, sets cuDNN deterministic, `CUBLAS_WORKSPACE_CONFIG` and `torch.use_deterministic_algorithms(warn_only=True)`. Re-running a config reproduces every number bitwise (tested from a fresh cache).
@@ -126,7 +131,7 @@ applies identically to both methods and was fixed before any real experiment ran
 2. **`anchored_nn` can only raise scores** (section 1 of `UNDERSTANDING.md`), so any gain must come from raising anomalous patches more than normal ones.
    - **A cheap mechanism check, before reading AUROCs.** For every query patch, take the 3D distance between the patch and its `global_nn` match, normalised by the diagonal. It needs no model calls on a warm cache.
    - If anomalous patches' global matches are not much farther away in 3D than normal patches' matches, the constraint cannot help at any radius.
-3. **Radius sweep.** r ∈ {0.025, 0.05, 0.1, 0.2, 0.4, ∞} runs from cache in minutes. r = ∞ must reproduce `global_nn`, a built-in sanity check. Report the full curve rather than the best point.
+3. **Radius sweep.** r ∈ {0.025, 0.05, 0.1, 0.2, 0.4, ∞} runs from cache in minutes. With `min_confidence: 0`, r = ∞ must reproduce `global_nn` bit for bit, a built-in sanity check. With the kill test's 1.5 it does not, because low-confidence reference patches are excluded. Report the full curve rather than the best point.
 4. **Out-of-distribution view sets for VGGT.**
    - VGGT was trained on sets whose frames overlap frame 1. Four random views of a full view sphere often do not overlap the query much.
    - Watch the unseen fraction and VGGT's confidence. A diagnostic on training images, using `transforms.json` only for that diagnostic (brief section 7), would measure registration error directly.

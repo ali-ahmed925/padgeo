@@ -87,13 +87,18 @@ class NearestNeighbourScores:
 
     Attributes:
         scores: [Q] float32 patch anomaly scores.
-        unseen_no_neighbour: [Q] bool; query patch confident but no reference patch near it in 3D.
+        unseen_no_neighbour: [Q] bool; query patch confident but no eligible reference patch near it in 3D.
         unseen_low_confidence: [Q] bool; query patch geometry confidence below the threshold.
+        radius_in_query_patches: anchored_nn radius mode: the absolute radius divided by the median
+            spacing of the query's patches on the surface (a scale-free radius in patches); else None.
+        eligible_reference_fraction: anchored_nn: fraction of the memory passing the confidence filter.
     """
 
     scores: torch.Tensor
     unseen_no_neighbour: torch.Tensor
     unseen_low_confidence: torch.Tensor
+    radius_in_query_patches: float | None = None
+    eligible_reference_fraction: float | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +111,8 @@ class MethodOutput:
         unseen_low_confidence: [h, w] bool (all False for global_nn).
         image_score: Image-level anomaly score.
         pixel_map: [H0, W0] float32 anomaly map at the original image size.
+        radius_in_query_patches: See `NearestNeighbourScores` (None for global_nn and kNN mode).
+        eligible_reference_fraction: See `NearestNeighbourScores` (None for global_nn).
     """
 
     patch_scores: torch.Tensor
@@ -113,6 +120,8 @@ class MethodOutput:
     unseen_low_confidence: torch.Tensor
     image_score: float
     pixel_map: np.ndarray
+    radius_in_query_patches: float | None
+    eligible_reference_fraction: float | None
 
     @property
     def unseen(self) -> torch.Tensor:
@@ -229,4 +238,6 @@ class Method(ABC):
             unseen_low_confidence=low_confidence,
             image_score=aggregate_image_score(patch_scores, self.aggregation.image_score),
             pixel_map=make_pixel_map(patch_scores, image_size, self.aggregation.pixel_sigma),
+            radius_in_query_patches=nearest.radius_in_query_patches,
+            eligible_reference_fraction=nearest.eligible_reference_fraction,
         )

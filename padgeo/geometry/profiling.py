@@ -18,7 +18,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from padgeo.config import AnchoredNNConfig, Config, ProfileConfig, RadiusNeighbourhood
+from padgeo.config import AnchoredNNConfig, Config, ProfileConfig
 from padgeo.data.base import ImageRef
 from padgeo.data.images import PATCH_SIZE, load_model_input
 from padgeo.data.registry import build_dataset
@@ -56,30 +56,41 @@ def _image_set(images: list[ImageRef], experiment: Config) -> ImageSet:
 def _point_differences(
     reference: PatchGeometry, other: PatchGeometry, image_set: ImageSet, method: AnchoredNNConfig
 ) -> dict[str, float]:
-    """Differences of `other` relative to `reference` on foreground patches (image 0 is the query)."""
+    """Differences of `other` relative to `reference` on foreground patches (image 0 is the query).
+
+    Shifts are normalised exactly as anchored_nn normalises its radius: by the bounding-box diagonal of the
+    eligible (confident, foreground) reference points of the baseline precision. `point_shift_p95_radius`
+    divides by the absolute radius that anchored_nn actually uses for this image set.
+
+    Raises:
+        ValueError: If the eligible reference points are degenerate (diagonal 0).
+    """
     mask = image_set.patch_foreground
-    diagonal = bounding_box_diagonal(reference.xyz[1:][mask[1:]])
-    distance = (other.xyz[mask] - reference.xyz[mask]).norm(dim=-1) / diagonal
+    reference_xyz, other_xyz = reference.xyz[1:][mask[1:]], other.xyz[1:][mask[1:]]
+    eligible_ref = reference.confidence[1:][mask[1:]] >= method.min_confidence
+    eligible_other = other.confidence[1:][mask[1:]] >= method.min_confidence
+    diagonal = bounding_box_diagonal(reference_xyz[eligible_ref])
+    if diagonal <= 0:
+        raise ValueError("degenerate reference point cloud (fewer than two distinct eligible points)")
+    shift = (other.xyz[mask] - reference.xyz[mask]).norm(dim=-1)
     report = {
-        "point_shift_median_diag": float(distance.median()),
-        "point_shift_p95_diag": float(torch.quantile(distance, 0.95)),
-        "point_shift_max_diag": float(distance.max()),
+        "point_shift_median_diag": float(shift.median()) / diagonal,
+        "point_shift_p95_diag": float(torch.quantile(shift, 0.95)) / diagonal,
+        "point_shift_max_diag": float(shift.max()) / diagonal,
         "confidence_rel_change_median": float(
             (
                 (other.confidence[mask] - reference.confidence[mask]).abs() / reference.confidence[mask]
             ).median()
         ),
     }
-    if isinstance(method.neighbourhood, RadiusNeighbourhood) and math.isfinite(method.neighbourhood.radius):
-        report["point_shift_p95_radius"] = report["point_shift_p95_diag"] / method.neighbourhood.radius
-    eligible_ref = reference.confidence[1:][mask[1:]] >= method.min_confidence
-    eligible_other = other.confidence[1:][mask[1:]] >= method.min_confidence
-    neighbours_ref = neighbour_mask(
-        reference.xyz[0][mask[0]], reference.xyz[1:][mask[1:]], eligible_ref, method.neighbourhood
+    neighbours_ref, radius = neighbour_mask(
+        reference.xyz[0][mask[0]], reference_xyz, eligible_ref, method.neighbourhood
     )
-    neighbours_other = neighbour_mask(
-        other.xyz[0][mask[0]], other.xyz[1:][mask[1:]], eligible_other, method.neighbourhood
+    neighbours_other, _ = neighbour_mask(
+        other.xyz[0][mask[0]], other_xyz, eligible_other, method.neighbourhood
     )
+    if radius is not None and math.isfinite(radius) and radius > 0:
+        report["point_shift_p95_radius"] = float(torch.quantile(shift, 0.95)) / radius
     union = int((neighbours_ref | neighbours_other).sum())
     report["neighbour_flip_rate"] = int((neighbours_ref ^ neighbours_other).sum()) / union if union else 0.0
     return report

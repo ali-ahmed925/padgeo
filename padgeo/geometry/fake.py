@@ -5,9 +5,9 @@ anchored scoring, the profiling and kill-test scripts) can be developed and test
 
 Scene: the unit sphere centred at the origin of a synthetic world. Each image gets a pinhole camera that
 looks at the origin from distance `CAMERA_DISTANCE`. Azimuth and elevation are derived from a hash of the
-image's pixels, so the output for an image set is a deterministic function of the images, as it is for
-VGGT, and different images see different (partly overlapping) caps of the sphere. The field of view is
-narrow enough that every pixel's ray hits the sphere.
+image's pixels within a cone of viewpoints, so the output for an image set is a deterministic function of
+the images, as it is for VGGT, and different images see different, overlapping caps of the sphere. The field
+of view is narrow enough that every pixel's ray hits the sphere.
 
 The outputs follow VGGT's conventions exactly (see `padgeo.geometry.camera`):
 
@@ -40,8 +40,11 @@ CAMERA_DISTANCE = 3.0
 # Focal length in units of image width. The sphere's silhouette subtends asin(1/3) = 19.5 degrees from the
 # camera; with f = 2.5 W the image corners are at atan(sqrt(2) / 5) = 15.8 degrees, so every ray hits it.
 FOCAL_FACTOR = 2.5
-# |sin(elevation)| <= 0.9 keeps cameras away from the poles, where the look-at frame degenerates.
-MAX_ABS_SIN_ELEVATION = 0.9
+# Viewpoints are drawn in a cone (azimuth within +-45 degrees, elevation within +-30 degrees) so that images
+# of one set overlap, as references and query do in practice; this also keeps cameras away from the poles,
+# where the look-at frame degenerates.
+MAX_AZIMUTH = math.pi / 4
+MAX_ELEVATION = math.pi / 6
 
 
 @dataclass(frozen=True)
@@ -64,7 +67,7 @@ def viewpoint_for_image(image: torch.Tensor) -> tuple[float, float]:
     digest = hashlib.sha256(image.detach().cpu().contiguous().numpy().tobytes()).digest()
     u1 = int.from_bytes(digest[:8], "big") / 2**64
     u2 = int.from_bytes(digest[8:16], "big") / 2**64
-    return 2.0 * math.pi * u1, math.asin(MAX_ABS_SIN_ELEVATION * (2.0 * u2 - 1.0))
+    return MAX_AZIMUTH * (2.0 * u1 - 1.0), MAX_ELEVATION * (2.0 * u2 - 1.0)
 
 
 def look_at_camera(azimuth: float, elevation: float, height: int, width: int) -> SyntheticCamera:
@@ -169,7 +172,9 @@ class FakeGeometryBackend(GeometryBackend):
             "backend": "fake",
             "point_source": self.config.point_source,
             "precision": self.config.precision,
-            "scene": f"unit_sphere_d{CAMERA_DISTANCE}_f{FOCAL_FACTOR}_e{MAX_ABS_SIN_ELEVATION}",
+            "scene": (
+                f"unit_sphere_d{CAMERA_DISTANCE}_f{FOCAL_FACTOR}_cone{MAX_AZIMUTH:.4f}_{MAX_ELEVATION:.4f}"
+            ),
         }
 
     def predict(self, images: torch.Tensor) -> PixelGeometry:

@@ -14,7 +14,6 @@ Both are expressed in the camera frame of image 0, VGGT's world frame.
 
 from __future__ import annotations
 
-import importlib.metadata
 import logging
 from typing import Any
 
@@ -27,6 +26,7 @@ from padgeo.geometry.base import GeometryBackend, PixelGeometry
 from padgeo.geometry.camera import unproject_depth
 from padgeo.utils.checks import check_tensor
 from padgeo.utils.precision import autocast
+from padgeo.utils.provenance import distribution_version
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class VGGTBackend(GeometryBackend):
             "backend": "vggt",
             "model": self.config.model,
             "revision": self.config.revision,
-            "vggt_package": importlib.metadata.version("vggt"),
+            "vggt_package": distribution_version("vggt"),  # includes the git commit
             "point_source": self.config.point_source,
             "precision": self.config.precision,
         }

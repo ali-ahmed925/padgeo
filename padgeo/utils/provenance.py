@@ -52,26 +52,28 @@ def git_state() -> dict[str, Any]:
     return {"commit": commit, "dirty": bool(dirty_files), "dirty_files": dirty_files.splitlines()}
 
 
-def package_versions() -> dict[str, str | None]:
-    """Installed versions of the packages that affect results (None if a package is not installed).
+def distribution_version(name: str) -> str | None:
+    """Installed version of a distribution, with the commit appended for VCS installs (None if absent).
 
-    For VCS installs (VGGT is installed from a pinned git commit), the commit is appended.
+    VGGT is installed from a pinned git commit and always reports version 0.0.1; the commit recorded in
+    pip's `direct_url.json` is what identifies its code.
     """
-    versions: dict[str, str | None] = {}
-    for name in _PACKAGES:
-        try:
-            dist = importlib.metadata.distribution(name)
-        except importlib.metadata.PackageNotFoundError:
-            versions[name] = None
-            continue
-        version = dist.version
-        direct_url = dist.read_text("direct_url.json")
-        if direct_url:
-            vcs = json.loads(direct_url).get("vcs_info")
-            if vcs:
-                version = f"{version}+{vcs.get('vcs', 'vcs')}.{vcs.get('commit_id')}"
-        versions[name] = version
-    return versions
+    try:
+        dist = importlib.metadata.distribution(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    version = dist.version
+    direct_url = dist.read_text("direct_url.json")
+    if direct_url:
+        vcs = json.loads(direct_url).get("vcs_info")
+        if vcs:
+            version = f"{version}+{vcs.get('vcs', 'vcs')}.{vcs.get('commit_id')}"
+    return version
+
+
+def package_versions() -> dict[str, str | None]:
+    """Installed versions of the packages that affect results (None if a package is not installed)."""
+    return {name: distribution_version(name) for name in _PACKAGES}
 
 
 def hardware() -> dict[str, Any]:

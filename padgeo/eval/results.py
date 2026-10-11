@@ -91,11 +91,18 @@ def _fraction(numerator: int, denominator: int) -> float:
     return numerator / denominator if denominator else 0.0
 
 
+def _median(values: Sequence[float | None]) -> float | None:
+    present = [value for value in values if value is not None]
+    return float(np.median(present)) if present else None
+
+
 def coverage_summary(records: Sequence[QueryRecord]) -> dict[str, Any]:
     """Unseen fractions over all foreground query patches of a class, and degenerate-query counts.
 
     Fractions pool patches over queries (total unseen / total foreground). Queries without foreground
-    patches are scored 0 everywhere; they are counted, never dropped.
+    patches are scored 0 everywhere; they are counted, never dropped. For anchored_nn it also reports the
+    median effective radius in query patches (radius mode) and the median fraction of reference patches
+    passing the confidence filter; both are None for global_nn.
     """
     foreground = sum(record.num_foreground for record in records)
     unseen = sum(int(record.output.unseen.sum()) for record in records)
@@ -107,6 +114,10 @@ def coverage_summary(records: Sequence[QueryRecord]) -> dict[str, Any]:
         "unseen_no_neighbour_fraction": _fraction(no_neighbour, foreground),
         "unseen_low_confidence_fraction": _fraction(low_confidence, foreground),
         "empty_foreground_queries": sum(record.num_foreground == 0 for record in records),
+        "radius_in_query_patches_median": _median([r.output.radius_in_query_patches for r in records]),
+        "eligible_reference_fraction_median": _median(
+            [r.output.eligible_reference_fraction for r in records]
+        ),
     }
 
 
@@ -171,6 +182,8 @@ def _query_rows(result: ClassResult) -> list[dict[str, Any]]:
                 "foreground_patches": record.num_foreground,
                 "unseen_no_neighbour": int(record.output.unseen_no_neighbour.sum()),
                 "unseen_low_confidence": int(record.output.unseen_low_confidence.sum()),
+                "radius_in_query_patches": record.output.radius_in_query_patches,
+                "eligible_reference_fraction": record.output.eligible_reference_fraction,
                 "references": " ".join(ref.name for ref in record.references),
                 "geometry_seconds": record.geometry_seconds,
                 "scoring_seconds": record.scoring_seconds,

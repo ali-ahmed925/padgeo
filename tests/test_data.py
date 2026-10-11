@@ -22,7 +22,7 @@ def test_split_lists_pool_and_queries_without_labels(dataset_root):
     )
     names = [q.name for q in split.queries]
     assert names == sorted(names)
-    assert len(names) == 4 + 2 + 2  # good (incl. the blank image), Missing, Stains
+    assert len(names) == 4 + 2 + 3  # good (incl. the blank image), Missing, Stains (incl. an empty mask)
     assert all(name.startswith("test/") for name in names)
     assert all(ref.name.startswith("train/good/") for ref in split.reference_pool)
     for ref in (*split.reference_pool, *split.queries):

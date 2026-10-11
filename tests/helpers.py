@@ -5,7 +5,7 @@ The fixture mirrors what docs/DATA_NOTES.md records about MAD-Sim: RGB PNGs on a
 `test/<type>/<n>.png` with `ground_truth/<type>/<n>_mask.png` masks holding {0, 255}, a Missing defect whose
 mask covers pixels that now show background, and a `transforms.json` that must never be read (it is not
 valid JSON). It also contains one blank query with no foreground at all (a degenerate sample that must be
-counted, not dropped).
+counted, not dropped), and one defective query whose mask is empty (kept as defective and counted).
 """
 
 from __future__ import annotations
@@ -92,6 +92,9 @@ def build_dataset(root: Path) -> Path:
             (test / "Missing").mkdir(parents=True, exist_ok=True)
             Image.fromarray(reference).save(test / "Missing" / f"{i}.png")
             save_mask(class_dir / "ground_truth" / "Missing" / f"{i}_mask.png", mask)
+        # A defective image whose defect is not visible: its mask is empty (MAD-Sim has 15 of these).
+        render_object(class_name, angle=1.9).save(test / "Stains" / "2.png")
+        save_mask(class_dir / "ground_truth" / "Stains" / "2_mask.png", np.zeros((SIZE, SIZE), dtype=bool))
     return root
 
 

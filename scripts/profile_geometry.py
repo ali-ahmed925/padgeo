@@ -35,6 +35,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     report = run_profile(profile, experiment)
     report["provenance"] = collect_provenance()
     report["profile_config"] = profile.model_dump(mode="json")
+    report["experiment_config"] = experiment.model_dump(mode="json")
+    report["seed"] = experiment.experiment.seeds[0]
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     markdown = render_profile(report)

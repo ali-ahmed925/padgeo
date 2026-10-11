@@ -84,6 +84,6 @@ The "Mean foreground patches / query" column counts the 1,369 patches of the 37 
 
    Background patches are excluded from scoring by the brief's rule, so these pixels score 0 for both methods. On a development run (`global_nn`, ViT-S, Mallard, seed 0), image AUROC of good vs Missing alone was 0.445, against 0.650 for Burrs and 0.742 for Stains (`outputs/m3_global_vits_mallard`).
 3. **Empty masks.** 15 defective images have an all-zero mask, presumably because the defect is not visible from that viewpoint. They keep their folder label and are counted in `results.json` (`defective_with_empty_mask`).
-4. **No leakage between splits.** No test image is byte-identical to a training image, and no class has duplicate files (checked by content hash; the loader raises otherwise).
+4. **No leakage between splits.** No test image is byte-identical to a training image, and no class has duplicate files (checked by content hash with `scripts/inspect_data.py`). The loader itself raises if a test image duplicates a training image.
 5. **Object size.** Foreground covers 121–374 of 1,369 patches (9–27%). A patch is therefore roughly 1/11–1/20 of the object's width in the image.
 6. **Poses.** Training images come with poses (`transforms.json`); test images do not. View coverage of the 210 training renders was not analysed, because the method does not use poses.

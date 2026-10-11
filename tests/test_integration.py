@@ -27,9 +27,12 @@ import numpy as np
 import pytest
 
 from padgeo.config import load_config
+from padgeo.data.base import ImageRef
 from padgeo.data.sampling import ReferenceSampler
+from padgeo.eval.results import coverage_summary
 from padgeo.features.dinov2 import DINOv2Extractor
 from padgeo.geometry.fake import FakeGeometryBackend
+from padgeo.geometry.store import GeometryStore
 from padgeo.pipeline import ExperimentRunner
 from tests.helpers import (
     ANCHORED_METHOD,
@@ -136,13 +139,14 @@ def test_result_files_are_complete(main_run):
             assert summary["config"]["method"]["name"] == method
             assert load_config(run_dir / "config.yaml").method.name == method  # resolved config reloads
             for class_name in CLASSES:
-                assert summary["queries"][class_name]["total"] == 8
+                assert summary["queries"][class_name]["total"] == 9
+                assert summary["queries"][class_name]["defective_with_empty_mask"] == 1  # kept, counted
                 assert summary["timing"]["per_class"][class_name]["seconds_per_query_end_to_end"] > 0
                 arrays = scores(main_run, name, seed, class_name)
-                assert arrays["patch_scores"].shape == (8, 37, 37)
+                assert arrays["patch_scores"].shape == (9, 37, 37)
                 assert arrays["foreground"].dtype == bool
             rows = per_query(main_run, name, seed)
-            assert len(rows) == 8 * len(CLASSES)
+            assert len(rows) == 9 * len(CLASSES)
             assert {row["defect_type"] for row in rows} == {"good", "Missing", "Stains"}
 
 
@@ -253,29 +257,72 @@ def test_reference_order_does_not_change_results(main_run, dataset_root, tmp_pat
     assert_same_results(main_run, tmp_path, ("fx_anchored",))
 
 
-def test_scores_are_blind_to_folder_names_and_ground_truth(main_run, dataset_root, tmp_path):
-    """Scoring a copy with renamed defect folders and no ground truth gives bit-identical scores."""
+def test_scores_are_blind_to_folder_names_file_names_and_ground_truth(main_run, dataset_root, tmp_path):
+    """A copy with every test folder (including good) and file renamed and no ground truth, scored from a
+    fresh cache (so features and geometry are recomputed), gives bit-identical scores."""
     copy = tmp_path / "renamed"
     shutil.copytree(dataset_root, copy)
     for class_name in CLASSES:
         shutil.rmtree(copy / class_name / "ground_truth")
-        (copy / class_name / "test" / "Missing").rename(copy / class_name / "test" / "zz_one")
-        (copy / class_name / "test" / "Stains").rename(copy / class_name / "test" / "aa_two")
+        test_dir = copy / class_name / "test"
+        for index, folder in enumerate(sorted(test_dir.iterdir())):
+            for file in folder.iterdir():
+                file.rename(folder / f"x{index}_{file.name}")
+            folder.rename(test_dir / f"folder_{9 - index}")
 
-    def score_all(root: Path) -> dict[str, tuple[float, np.ndarray]]:
-        config = experiment_config("blind", root, main_run, ANCHORED_METHOD)  # warm cache: same image hashes
-        runner = ExperimentRunner(load_config(write_config(tmp_path / f"{root.name}.yaml", config)))
+    def score_all(root: Path, work: Path) -> dict[tuple[str, str], tuple[float, np.ndarray]]:
+        config = experiment_config("blind", root, work, ANCHORED_METHOD)
+        runner = ExperimentRunner(load_config(write_config(work / f"{root.name}.yaml", config)))
         return {
-            record.query.content_hash: (record.output.image_score, record.output.patch_scores.numpy())
+            (class_name, record.query.content_hash): (
+                record.output.image_score,
+                record.output.patch_scores.numpy(),
+            )
             for class_name in CLASSES
             for record in runner.score_class(class_name, seed=0).records
         }
 
-    expected, renamed = score_all(dataset_root), score_all(copy)
+    expected = score_all(dataset_root, main_run)  # warm cache of the main run
+    renamed = score_all(copy, tmp_path)  # fresh cache: everything recomputed from the renamed files
     assert renamed.keys() == expected.keys()
     for key, (image_score, patch_scores) in renamed.items():
         assert image_score == expected[key][0]
         assert np.array_equal(patch_scores, expected[key][1])
+
+
+def test_geometry_pass_gets_the_query_first_then_references_by_content_hash(
+    main_run, dataset_root, tmp_path, monkeypatch
+):
+    seen: list[list[ImageRef]] = []
+    original = GeometryStore.get
+
+    def spy(self: GeometryStore, images: list[ImageRef]) -> object:
+        seen.append(list(images))
+        return original(self, images)
+
+    monkeypatch.setattr(GeometryStore, "get", spy)
+    config = experiment_config("order", dataset_root, main_run, ANCHORED_METHOD)
+    runner = ExperimentRunner(load_config(write_config(tmp_path / "order.yaml", config)))
+    records = runner.score_class(CLASSES[0], seed=0).records
+    assert len(seen) == len(records)
+    for images, record in zip(seen, records, strict=True):
+        assert images[0] == record.query
+        assert [ref.content_hash for ref in images[1:]] == sorted(ref.content_hash for ref in images[1:])
+        assert tuple(images[1:]) == record.references
+
+
+def test_anchoring_is_exercised_and_the_confidence_filter_triggers(main_run, dataset_root, tmp_path):
+    # Fake confidence is 1 + 9 cos(incidence); the fixture objects are small and central, so only a strict
+    # threshold (incidence above about 8 degrees) removes patches.
+    method = {**ANCHORED_METHOD, "min_confidence": 9.9}
+    config = experiment_config("strict_conf", dataset_root, main_run, method)  # geometry cache is reused
+    runner = ExperimentRunner(load_config(write_config(tmp_path / "strict.yaml", config)))
+    strict = coverage_summary(runner.score_class(CLASSES[0], seed=0).records)
+    assert strict["unseen_low_confidence_fraction"] > 0.0  # the filter removes grazing-angle patches
+    default = results(main_run, "fx_anchored", 0)["coverage"][CLASSES[0]]
+    assert default["unseen_fraction"] < 0.9  # most patches really are matched in 3D, not by fallback
+    assert default["radius_in_query_patches_median"] > 0.0
+    assert strict["eligible_reference_fraction_median"] < default["eligible_reference_fraction_median"]
 
 
 def test_per_object_sampling_reuses_one_reference_set_per_class(main_run, dataset_root, tmp_path):
@@ -296,5 +343,5 @@ def test_max_queries_per_class_evaluates_an_evenly_spaced_subset(main_run, datas
     rows = per_query(tmp_path, "fx_subset", 0)
     for class_name in CLASSES:
         names = [r["query"] for r in rows if r["class"] == class_name]
-        # 8 queries sorted by name (upper case first): indices 0, 4 (3.5 rounded half to even) and 7.
-        assert names == ["test/Missing/0.png", "test/good/0.png", "test/good/3.png"]
+        # 9 queries sorted by name (upper case first): indices 0, 4 and 8.
+        assert names == ["test/Missing/0.png", "test/Stains/2.png", "test/good/3.png"]

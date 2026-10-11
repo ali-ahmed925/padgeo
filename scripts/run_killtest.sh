@@ -39,8 +39,5 @@ python scripts/run.py --config "$ANCHORED"
 echo "== 4/4 table and figures"
 python scripts/make_table.py --configs "$GLOBAL" "$ANCHORED" \
   --reference configs/reference_numbers.yaml --out "$TABLE" --title "$TITLE"
-for class_name in 03Mallard 04Turtle 18Obesobeso; do
-  python scripts/visualise.py --configs "$GLOBAL" "$ANCHORED" --seed 0 --class-name "$class_name" \
-    --first-per-type --out "$FIGURES"
-done
+python scripts/visualise.py --configs "$GLOBAL" "$ANCHORED" --seed 0 --first-per-type --out "$FIGURES"
 echo "Table: $TABLE   Figures: $FIGURES"

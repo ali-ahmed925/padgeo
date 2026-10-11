@@ -21,6 +21,14 @@ Nothing is trained anywhere.
 
 ## 1. Setup on a fresh machine (24 GB GPU)
 
+Prerequisites:
+
+- an NVIDIA driver recent enough for the CUDA 12.1 wheels of torch 2.3.1 (version 525 or newer);
+- internet access to GitHub, PyPI, Hugging Face and `dl.fbaipublicfiles.com` on first use;
+- about 20 GB free disk: about 2 GB of data, 6 GB of weights, and about 4 GB of caches for the kill test.
+
+`requirements-lock.txt` records the full environment the code was developed and tested in.
+
 Run every command from the repository root.
 
 ```bash

@@ -110,6 +110,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         for key, value in values.items():
             print(f"   {key}: {value}")
     if args.json:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(json.dumps(stats, indent=2))
     return stats
 

@@ -24,6 +24,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 def fake_result(method: str, seed: int, value: float) -> dict:
     metrics = {"image_auroc": value, "pixel_auroc": value, "aupro": value}
+    anchored = method == "anchored_nn"
     return {
         "experiment": f"exp_{method}",
         "method": method,
@@ -41,6 +42,8 @@ def fake_result(method: str, seed: int, value: float) -> dict:
                 "unseen_no_neighbour_fraction": 0.05,
                 "unseen_low_confidence_fraction": 0.05,
                 "empty_foreground_queries": 0,
+                "radius_in_query_patches_median": 2.5 + seed if anchored else None,
+                "eligible_reference_fraction_median": 0.9 if anchored else None,
             }
         },
         "config": {
@@ -48,6 +51,7 @@ def fake_result(method: str, seed: int, value: float) -> dict:
             "features": {"backbone": "dinov2_vitl14"},
             "foreground": {"pixel_threshold": 0.98},
             "aggregation": {"pixel_sigma": 4.0},
+            "method": {"name": method, "device": "cuda"},
         },
         "provenance": {
             "git": {"commit": "a" * 40, "dirty": seed == 1},
@@ -106,14 +110,18 @@ def test_render_markdown_contents():
     )
     assert "## T" in markdown
     for expected in (
-        "55.0 ± 7.1",
-        "75.0 ± 7.1",
+        "55.0 ± 7.1",  # global_nn: 50 and 60
+        "75.0 ± 7.1",  # anchored_nn: 70 and 80
+        "| exp_anchored_nn | **Mean** | +20.0 ± 0.0 | +20.0 ± 0.0 | +20.0 ± 0.0 |",  # paired per seed
+        "Image AUROC · exp_global_nn | Image AUROC · exp_anchored_nn",  # columns labelled by run
+        '- `exp_anchored_nn`: anchored_nn, {"device": "cuda"}',  # method settings listed
+        "| exp_anchored_nn | 03Mallard | 10.0 ± 0.0 | 5.0 ± 0.0 | 5.0 ± 0.0 | 3.0 ± 0.7 | 90.0 ± 0.0 | 0 |",
+        "| 03Mallard | Missing | 27.5 ± 3.5",
         "PADFormer",
         "81.3",
         "UniVAD",
-        "| 03Mallard | Missing | 27.5 ± 3.5",
     ):
-        assert expected in markdown
+        assert expected in markdown, expected
     assert "not a like-for-like comparison" in markdown
     assert "Coverage of anchored_nn" in markdown
     assert "(uncommitted changes)" in markdown  # seed 1 of each run is marked dirty
@@ -125,12 +133,27 @@ def test_reference_numbers_file_matches_the_paper_table():
     assert (padformer.image_auroc, padformer.pixel_auroc, padformer.aupro) == (81.3, 92.9, 86.7)
 
 
-def test_load_run_set_reads_seeds_in_order(tmp_path):
-    for seed in (1, 0):
-        path = tmp_path / f"seed_{seed}" / "results.json"
-        path.parent.mkdir()
-        path.write_text(json.dumps(fake_result("global_nn", seed, 0.5)))
-    rs = load_run_set(tmp_path)
-    assert rs.seeds == [0, 1]
-    with pytest.raises(FileNotFoundError):
-        load_run_set(tmp_path / "missing")
+def test_load_run_set_reads_exactly_the_configured_seeds(tmp_path):
+    from padgeo.config import Config
+
+    config = Config.model_validate(
+        {
+            "experiment": {"name": "exp", "output_dir": str(tmp_path), "seeds": [1, 0]},
+            "data": {"root": "r", "classes": ["03Mallard"]},
+            "method": {"name": "global_nn"},
+        }
+    )
+    resolved = json.loads(config.model_dump_json())
+    for seed in (0, 1, 7):  # seed 7 is a leftover of an older run with other seeds: ignored
+        path = tmp_path / "exp" / f"seed_{seed}" / "results.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({**fake_result("global_nn", seed, 0.5), "config": resolved}))
+    rs = load_run_set(config)
+    assert rs.seeds == [1, 0]  # the configured seeds, in config order
+    stale = tmp_path / "exp" / "seed_0" / "results.json"
+    stale.write_text(json.dumps({**fake_result("global_nn", 0, 0.5), "config": {**resolved, "cache": {}}}))
+    with pytest.raises(ValueError, match="different config"):
+        load_run_set(config)
+    (tmp_path / "exp" / "seed_1" / "results.json").unlink()
+    with pytest.raises(FileNotFoundError, match="seed 1"):
+        load_run_set(config)

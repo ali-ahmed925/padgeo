@@ -281,12 +281,16 @@ def test_neighbour_mask_respects_eligibility_and_k():
     query = torch.tensor([[0.0, 0.0, 0.0]])
     memory = torch.tensor([[0.1, 0, 0], [0.2, 0, 0], [0.3, 0, 0]])
     eligible = torch.tensor([False, True, True])
-    knn = neighbour_mask(query, memory, eligible, KNNNeighbourhood(mode="knn", k=1))
+    knn, knn_radius = neighbour_mask(query, memory, eligible, KNNNeighbourhood(mode="knn", k=1))
     assert knn.tolist() == [[False, True, False]]
-    knn_large = neighbour_mask(query, memory, eligible, KNNNeighbourhood(mode="knn", k=10))
+    assert knn_radius is None  # kNN has no radius
+    knn_large, _ = neighbour_mask(query, memory, eligible, KNNNeighbourhood(mode="knn", k=10))
     assert knn_large.tolist() == [[False, True, True]]
-    radius = neighbour_mask(query, memory, eligible, RadiusNeighbourhood(mode="radius", radius=math.inf))
-    assert radius.tolist() == [[False, True, True]]
+    radius_mask, radius = neighbour_mask(
+        query, memory, eligible, RadiusNeighbourhood(mode="radius", radius=math.inf)
+    )
+    assert radius_mask.tolist() == [[False, True, True]]
+    assert radius == math.inf
 
 
 def test_anchored_requires_geometry():
@@ -305,3 +309,40 @@ def test_build_method_dispatches_on_config():
         min_confidence=1.5,
     )
     assert isinstance(build_method(anchored_config, AGG), AnchoredNN)
+
+
+def test_bounding_box_diagonal_ignores_a_few_stray_points():
+    gen = torch.Generator().manual_seed(0)
+    cloud = torch.rand(300, 3, generator=gen) * torch.tensor([1.0, 0.6, 0.4])
+    with_outlier = torch.cat([cloud, torch.tensor([[4.0, 0.3, 0.2]])])
+    clean, stretched = bounding_box_diagonal(cloud), bounding_box_diagonal(with_outlier)
+    assert stretched == pytest.approx(clean, rel=0.05)  # an untrimmed box would be about 2.6 times larger
+
+
+def test_radius_scales_with_the_diagonal_of_eligible_reference_points_only():
+    # Eligible references span x in [0, 1]; an ineligible far point at x = 50 must not enlarge the radius.
+    query = patch_set(unit([1, 0]), xyz=torch.tensor([[0.5, 0, 0]]), conf=torch.tensor([9.0]))
+    ref = patch_set(
+        unit([0, 1], [0, 1], [1, 0]),
+        xyz=torch.tensor([[0.0, 0, 0], [1.0, 0, 0], [50.0, 0, 0]]),
+        conf=torch.tensor([9.0, 9.0, 1.0]),
+    )
+    out = anchored(radius=0.4, min_confidence=5.0, unseen="max").score(query, [ref], (1, 1))
+    # radius 0.4 x diagonal 1 = 0.4 < 0.5: no eligible neighbour (with the far point counted, 0.4 x 50 = 20).
+    assert out.unseen_no_neighbour.tolist() == [[True]]
+    assert out.eligible_reference_fraction == pytest.approx(2 / 3)
+
+
+def test_anchored_reports_radius_in_query_patches():
+    # Query patches 0.1 apart: the patch spacing is 0.1. References are the corners of a 2 x 1 rectangle
+    # (distinct principal axes, so the box is unambiguous): diagonal sqrt(5).
+    query_xyz = torch.tensor([[0.1 * i, 0.0, 0.0] for i in range(5)])
+    query = patch_set(F.normalize(torch.randn(5, 4), dim=-1), xyz=query_xyz, conf=torch.full((5,), 9.0))
+    corners = torch.tensor([[x, y, 0.0] for x in (0.0, 2.0) for y in (0.0, 1.0)])
+    ref = patch_set(F.normalize(torch.randn(4, 4), dim=-1), xyz=corners, conf=torch.full((4,), 9.0))
+    out = anchored(radius=0.1).score(query, [ref], (1, 5))
+    assert out.radius_in_query_patches == pytest.approx(0.1 * math.sqrt(5) / 0.1, rel=1e-3)
+    assert out.eligible_reference_fraction == 1.0
+    global_out = GlobalNN(GlobalNNConfig(name="global_nn"), AGG).score(query, [ref], (1, 5))
+    assert global_out.radius_in_query_patches is None
+    assert global_out.eligible_reference_fraction is None

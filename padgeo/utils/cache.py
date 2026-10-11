@@ -20,7 +20,8 @@ from typing import Any
 import torch
 
 # Bump when the meaning of any cached value changes; it is part of every identity.
-CACHE_FORMAT_VERSION = 1
+# 2: VGGT code commit added to the feature and geometry identities.
+CACHE_FORMAT_VERSION = 2
 
 
 class CacheIdentityError(RuntimeError):
@@ -79,7 +80,8 @@ class TensorCache:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "identity": identity_json,
-            "tensors": {name: tensor.detach().to("cpu").contiguous() for name, tensor in tensors.items()},
+            # clone: a view (e.g. one image of a batch) would otherwise serialise its whole parent storage.
+            "tensors": {name: tensor.detach().to("cpu").clone() for name, tensor in tensors.items()},
         }
         fd, tmp_name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
         os.close(fd)

@@ -93,4 +93,5 @@ def test_half_precision_features_are_close_to_full_precision(extractor, images, 
     approx = unpack_features(half.extract(images[:1])[0])
     cosine = (full * approx).sum(-1)
     assert float(cosine.min()) > 0.97  # same features up to reduced-precision noise
+    assert not torch.equal(full, approx)  # but the precision setting really changes the computation
     assert half.identity["precision"] == precision  # and cached under a different key

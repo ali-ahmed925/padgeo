@@ -48,3 +48,10 @@ def test_mismatched_identity_inside_file_raises(tmp_path):
     torch.save(entry, path)
     with pytest.raises(CacheIdentityError):
         cache.load(identity)
+
+
+def test_saving_a_view_stores_only_the_view(tmp_path):
+    batch = torch.zeros(16, 37, 37, 384, dtype=torch.float16)  # one image is about 1 MB
+    TensorCache(tmp_path, "features").save({"image": "a"}, {"features": batch[3]})
+    size = sum(path.stat().st_size for path in tmp_path.rglob("*.pt"))
+    assert size < 2 * batch[3].numel() * batch.element_size()  # not the whole 16-image batch

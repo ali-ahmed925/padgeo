@@ -23,6 +23,7 @@ from padgeo.config import FeatureConfig
 from padgeo.utils.cache import TensorCache
 from padgeo.utils.checks import check_tensor
 from padgeo.utils.precision import autocast
+from padgeo.utils.provenance import distribution_version
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,8 @@ class DINOv2Extractor:
             "precision": self.config.precision,
             "layer": "x_norm_patchtokens",
             "storage": str(_STORAGE_DTYPE),
+            # The input tensor comes from VGGT's preprocessing, so its code version is part of the identity.
+            "preprocessing": f"vggt {distribution_version('vggt')}",
         }
 
     def _load_model(self) -> torch.nn.Module:

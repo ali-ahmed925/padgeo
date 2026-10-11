@@ -24,6 +24,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -249,14 +250,18 @@ class ExperimentRunner:
 
     def run(self) -> list[Path]:
         """Run every seed; returns the per-seed result directories."""
-        provenance = collect_provenance()
-        if provenance["git"]["dirty"]:
-            logger.warning("Uncommitted changes in tracked files: %s", provenance["git"]["dirty_files"])
+        provenance: dict[str, Any] | None = None
         run_dirs = []
         for seed in self.config.experiment.seeds:
             run_dir = self.config.experiment.output_dir / self.config.experiment.name / f"seed_{seed}"
             setup_logging(run_dir / "run.log")
             seed_everything(seed)
+            if provenance is None:  # after seeding: it initialises CUDA, which must follow the cuBLAS setting
+                provenance = collect_provenance()
+                if provenance["git"]["dirty"]:
+                    logger.warning(
+                        "Uncommitted changes in tracked files: %s", provenance["git"]["dirty_files"]
+                    )
             self.feature_store.cache.reset_counters()
             if self.geometry_store is not None:
                 self.geometry_store.cache.reset_counters()

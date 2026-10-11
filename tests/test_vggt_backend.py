@@ -33,6 +33,19 @@ class FixedOutput(torch.nn.Module):
         return self.output
 
 
+class RecordingOutput(FixedOutput):
+    """A FixedOutput that records whether CPU autocast was active, and its dtype, when called."""
+
+    def __init__(self, output: object) -> None:
+        super().__init__(output)
+        self.autocast: tuple[bool, torch.dtype | None] | None = None
+
+    def forward(self, *_inputs: object, **_named_inputs: object) -> object:
+        enabled = torch.is_autocast_cpu_enabled()
+        self.autocast = (enabled, torch.get_autocast_cpu_dtype() if enabled else None)
+        return self.output
+
+
 class StubVGGT(torch.nn.Module):
     """Mimics VGGT's module interface and output shapes; outputs the fake backend's exact scene."""
 
@@ -47,9 +60,9 @@ class StubVGGT(torch.nn.Module):
         self.conf = torch.stack([r[2] for r in rendered])[None]  # [1, S, H, W]
         fake = FakeGeometryBackend(FakeGeometryConfig(backend="fake"))
         self.points = fake.render(cameras, H, W).points[None]  # [1, S, H, W, 3]
-        self.aggregator = FixedOutput(([torch.zeros(1)], 5))  # (token list, patch start index)
+        self.aggregator = RecordingOutput(([torch.zeros(1)], 5))  # (token list, patch start index)
         self.camera_head = FixedOutput([self.pose_enc])  # one pose encoding per refinement iteration
-        self.depth_head = FixedOutput((self.depth, self.conf))
+        self.depth_head = RecordingOutput((self.depth, self.conf))
         self.point_head = FixedOutput((self.points, self.conf))
         self.track_head = FixedOutput(None)
         self.calls: list[tuple[str, str, bool]] = []  # arguments of each from_pretrained call
@@ -100,3 +113,13 @@ def test_model_is_loaded_once_and_lazily(stub):
     backend.predict(images)
     backend.predict(images)
     assert len(stub.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("precision", "aggregator"), [("fp32", (False, None)), ("bf16", (True, torch.bfloat16))]
+)
+def test_precision_sets_autocast_for_the_aggregator_and_never_for_the_heads(stub, precision, aggregator):
+    config = VGGTGeometryConfig(backend="vggt", revision="r1", precision=precision, device="cpu")
+    VGGTBackend(config).predict(torch.rand(len(VIEWPOINTS), 3, H, W))
+    assert stub.aggregator.autocast == aggregator
+    assert stub.depth_head.autocast == (False, None)  # heads run in fp32, as in VGGT.forward

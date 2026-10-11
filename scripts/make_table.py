@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> str:
     parser.add_argument("--title", default="Kill test: global_nn vs anchored_nn", help="section title")
     args = parser.parse_args(argv)
     configs = [load_config(path) for path in args.configs]
-    run_sets = [load_run_set(cfg.experiment.output_dir / cfg.experiment.name) for cfg in configs]
+    run_sets = [load_run_set(cfg) for cfg in configs]
     markdown = render_markdown(run_sets, load_reference_numbers(args.reference), args.title)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(markdown, encoding="utf-8")
