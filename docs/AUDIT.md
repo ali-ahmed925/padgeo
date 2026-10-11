@@ -222,9 +222,38 @@ would have no effect is rejected (`test_config.py::test_unknown_or_irrelevant_ke
 
 ## 7. Verified only with the fake backend or a stub, still to check with real VGGT on the 24 GB machine
 
+### One real VGGT check on the development machine
+
+The pinned checkpoint was downloaded and checked against its SHA-256. A one-off smoke test then ran padgeo's
+own `VGGTBackend` on one real MAD-Sim image set, with no scores, labels or ground truth involved:
+
+- query `03Mallard/test/Burrs/0.png`;
+- references `train/good/28.png` and `train/good/123.png` (seed 0, per-query sampling).
+
+On the 6 GB GPU in bf16 it ran out of memory (the fp32 weights alone take about 4.7 GB), so it ran on CPU in
+fp32, about 90 s per point source including model loading. Results:
+
+| Check | Depth unprojection | Point map |
+|---|---|---|
+| Output | points `(3, 518, 518, 3)` | points `(3, 518, 518, 3)` |
+| Confidence, object pixels (median) | 18.1 | 20.8 |
+| Confidence, white background (median) | 1.00 (the minimum) | 1.00 (the minimum) |
+| Foreground patches below `min_confidence` 1.5 | 0.0% | 0.1% |
+| Effective radius (0.1 × trimmed diagonal) | 4.0 query patches | 4.1 query patches |
+| Query foreground patches with at least one neighbour | 100% (median 30 neighbours) | 100% (median 29) |
+
+The two point sources agree to a median of 0.36% of the diagonal (p95 0.81%), an order of magnitude below the
+radius. All query points lie in front of the query camera (z > 0), consistent with the query as frame 0.
+
+This is one image set with N = 2, so it is not a measurement of accuracy. The effective radius (about 4
+patches, against the a-priori estimate of about 2.5) is reported, not acted on: `radius: 0.1` stays fixed,
+and the radius sweep from cache will show sensitivity.
+
+### Still open for the experiment machine
+
 1. **A real VGGT-1B forward pass through `VGGTBackend`.**
    - Locally, the forward path is tested with a stub network that returns the fake scene through VGGT's own camera encoding. That stub test covers camera decoding, output indexing, unprojection and both point sources.
-   - Still unchecked: the real network's outputs, memory, and bf16 autocast on CUDA.
+   - The CPU smoke test above ran the real network in fp32. Still unchecked: memory and bf16 autocast on CUDA.
    - Check: run `PADGEO_RUN_VGGT=1 pytest -m vggt_weights`, and the profile step of the kill test.
 2. **Whether VGGT's geometry is good enough on MAD-Sim for anchoring.** That is, whether query patches land near the matching reference patches. The coverage table of the kill test reports the unseen fraction under `radius: 0.1` and `min_confidence: 1.5`. If most patches are unseen, `anchored_nn` degenerates to `global_nn` and the kill test says little.
 3. **VGGT's depth-confidence distribution on MAD-Sim renders.** It decides how many patches the 1.5 threshold drops (the "Low confidence" column of the coverage table).
