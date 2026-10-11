@@ -1,7 +1,7 @@
 # Data, caches and run outputs are never committed.
-data/
-cache/
-outputs/
+/data/
+/cache/
+/outputs/
 
 # Python
 __pycache__/
